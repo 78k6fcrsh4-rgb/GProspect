@@ -1,0 +1,70 @@
+{
+  "org_name": "Deborah's Place",
+  "run_date": "2026-05-20",
+  "warm_paths": [],
+  "co_funders": [],
+  "timing_signals": [
+    {
+      "funder_name": "Chicago Foundation for Women",
+      "signal_type": "annual_cycle_likely",
+      "last_award": 2024,
+      "last_amount": "$50,000",
+      "recommended_action": "Monitor Chicago Foundation for Women's website for RFP announcement. Based on prior award history, a new cycle may open within 90 days. Contact program officer now to confirm timeline."
+    },
+    {
+      "funder_name": "Chicago Community Trust",
+      "signal_type": "annual_cycle_likely",
+      "last_award": 2024,
+      "last_amount": "$85,000",
+      "recommended_action": "Monitor Chicago Community Trust's website for RFP announcement. Based on prior award history, a new cycle may open within 90 days. Contact program officer now to confirm timeline."
+    }
+  ],
+  "prior_funder_activity": [
+    {
+      "funder_name": "Chicago Foundation for Women",
+      "last_award_year": 2024,
+      "last_award_amount": 50000,
+      "funder_type": "community_foundation",
+      "notes": "Prior relationship through the Eleanor Network. Warm lead \u2014 highest priority.",
+      "status": "recent_lapsed",
+      "recommended_action": "Re-engagement priority \u2014 reach out to program officer to reconnect and share recent impact."
+    },
+    {
+      "funder_name": "Polk Bros. Foundation",
+      "last_award_year": 2023,
+      "last_award_amount": 75000,
+      "funder_type": "private_foundation",
+      "notes": "Multi-year funder. Check for open RFPs through mid-2026.",
+      "status": "recent_lapsed",
+      "recommended_action": "Re-engagement priority \u2014 reach out to program officer to reconnect and share recent impact."
+    },
+    {
+      "funder_name": "MacArthur Foundation",
+      "last_award_year": 2023,
+      "last_award_amount": 100000,
+      "funder_type": "private_foundation",
+      "notes": "Co-chair of Resilient Chicago Fund. Increased grantmaking in 2025-2026.",
+      "status": "recent_lapsed",
+      "recommended_action": "Re-engagement priority \u2014 reach out to program officer to reconnect and share recent impact."
+    },
+    {
+      "funder_name": "Joyce Foundation",
+      "last_award_year": 2022,
+      "last_award_amount": 60000,
+      "funder_type": "private_foundation",
+      "notes": "Strong alignment with economic mobility programs.",
+      "status": "dormant",
+      "recommended_action": "Research funder's current priorities before re-engagement \u2014 giving focus may have shifted."
+    },
+    {
+      "funder_name": "Chicago Community Trust",
+      "last_award_year": 2024,
+      "last_award_amount": 85000,
+      "funder_type": "community_foundation",
+      "notes": "Co-leads Resilient Chicago Fund. Active grant programs open to Chicago nonprofits.",
+      "status": "recent_lapsed",
+      "recommended_action": "Re-engagement priority \u2014 reach out to program officer to reconnect and share recent impact."
+    }
+  ],
+  "summary": "Relationship mapping run complete for Deborah's Place. Analysis covered 5 known funder relationships, identified 0 warm path cultivation targets, found 0 potential co-funder connections, and surfaced 2 strategic timing signals. See full report for recommended actions on each finding."
+}

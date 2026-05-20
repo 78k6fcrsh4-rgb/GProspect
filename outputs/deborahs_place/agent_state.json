@@ -1,0 +1,120 @@
+{
+  "org_name": "Deborah's Place",
+  "last_saved": "2026-05-20T17:33:19.066346",
+  "seen_fingerprints": [
+    "ed0cf4473912b94f54eee71246f13141"
+  ],
+  "known_opportunity_ids": [
+    "2105e680-d8e6-40cf-8634-b6d576248268"
+  ],
+  "watch_list": [
+    {
+      "name": "Polk Bros. Foundation",
+      "url": "https://www.polkbrosfoundation.org/grants",
+      "type": "foundation_website",
+      "priority": "high",
+      "added_by": "seed"
+    },
+    {
+      "name": "MacArthur Foundation",
+      "url": "https://www.macfound.org/grants",
+      "type": "foundation_website",
+      "priority": "high",
+      "added_by": "seed"
+    },
+    {
+      "name": "Chicago Community Trust",
+      "url": "https://www.cct.org/grants",
+      "type": "foundation_website",
+      "priority": "high",
+      "added_by": "seed"
+    },
+    {
+      "name": "Chicago Foundation for Women",
+      "url": "https://www.cfw.org/grants",
+      "type": "foundation_website",
+      "priority": "high",
+      "added_by": "seed"
+    },
+    {
+      "name": "Joyce Foundation",
+      "url": "https://www.joycefdn.org/grants",
+      "type": "foundation_website",
+      "priority": "high",
+      "added_by": "seed"
+    },
+    {
+      "name": "Robert Wood Johnson Foundation",
+      "url": "https://www.rwjf.org/en/grants",
+      "type": "foundation_website",
+      "priority": "medium",
+      "added_by": "seed"
+    },
+    {
+      "name": "W.K. Kellogg Foundation",
+      "url": "https://www.wkkf.org/grants",
+      "type": "foundation_website",
+      "priority": "medium",
+      "added_by": "seed"
+    },
+    {
+      "name": "Ms. Foundation for Women",
+      "url": "https://forwomen.org/grants",
+      "type": "foundation_website",
+      "priority": "medium",
+      "added_by": "seed"
+    },
+    {
+      "name": "Philanthropy News Digest",
+      "url": "https://philanthropynewsdigest.org/rfps",
+      "type": "aggregator",
+      "priority": "medium",
+      "added_by": "seed"
+    },
+    {
+      "name": "Grants.gov",
+      "url": "https://www.grants.gov",
+      "type": "federal_database",
+      "priority": "low",
+      "added_by": "seed"
+    },
+    {
+      "name": "Pritzker Traubert Foundation",
+      "url": "https://ptfchicago.org/grants",
+      "type": "foundation_website",
+      "priority": "high",
+      "added_by": "test",
+      "added_date": "2026-05-20",
+      "notes": ""
+    }
+  ],
+  "run_history": [
+    {
+      "timestamp": "2026-05-20T17:02:49.205848",
+      "cycle_type": "manual",
+      "queries_run": 1,
+      "raw_results": 21,
+      "filtered": 1,
+      "final_results": 1,
+      "output_path": ""
+    },
+    {
+      "timestamp": "2026-05-20T17:20:40.982790",
+      "cycle_type": "discovery",
+      "queries_run": 3,
+      "raw_results": 0,
+      "filtered": 0,
+      "final_results": 0,
+      "output_path": ""
+    },
+    {
+      "timestamp": "2026-05-20T17:33:19.066132",
+      "cycle_type": "relationship_map",
+      "queries_run": 0,
+      "raw_results": 0,
+      "filtered": 0,
+      "final_results": 0,
+      "output_path": ""
+    }
+  ]
+}
