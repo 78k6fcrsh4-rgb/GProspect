@@ -1,0 +1,117 @@
+{
+  "_instructions": {
+    "purpose": "This is the organizational profile template for the Grant Prospecting AI Agent. Fill in every required field below and save the file with your organization's name, e.g. 'my_org_name.json'. Then run: python3 run_agent.py --profile profiles/my_org_name.json",
+    "required_fields": "Fields marked REQUIRED must be filled in. The agent will not run without them.",
+    "optional_fields": "Fields marked OPTIONAL can be left as null or empty. They improve results but are not required to start.",
+    "getting_help": "If you are unsure about any field, refer to the README.md file or contact the AI for Good team."
+  },
+
+  "_section_1": "ORGANIZATION IDENTITY",
+
+  "org_name": "",
+  "_org_name_help": "REQUIRED. Full legal name of your organization exactly as it appears on your IRS determination letter. e.g. Deborah's Place Inc.",
+
+  "org_short_name": "",
+  "_org_short_name_help": "REQUIRED. The name your team uses day to day. Used in reports and logs. e.g. Deborah's Place",
+
+  "ein": null,
+  "_ein_help": "OPTIONAL but strongly recommended. Your IRS Employer Identification Number in format XX-XXXXXXX e.g. 36-3786883. Used to find your organization in IRS 990 data and foundation databases.",
+
+  "ntee_codes": [],
+  "_ntee_codes_help": "OPTIONAL but strongly recommended. Your organization's NTEE codes — the IRS classification system for nonprofits. e.g. ['L41', 'P20']. Look yours up at: https://nccs.urban.org/publication/irs-activity-codes. Common codes: L41=Temporary Housing/Shelter, L80=Housing Support, P20=Human Services, P60=Emergency Assistance.",
+
+  "website": null,
+  "_website_help": "OPTIONAL. Your organization's public website URL. e.g. https://www.yourorg.org",
+
+  "founded_year": null,
+  "_founded_year_help": "OPTIONAL. The year your organization was founded. e.g. 1983",
+
+  "_section_2": "MISSION",
+
+  "mission_statement": "",
+  "_mission_statement_help": "REQUIRED. Your organization's full mission statement. Copy it exactly from your website or IRS determination letter. Must be at least 20 characters. The agent uses this to score how well each grant opportunity aligns with your mission.",
+
+  "mission_keywords": [],
+  "_mission_keywords_help": "OPTIONAL but recommended. Additional words and phrases that describe your work beyond the mission statement. These help the agent find grants that use different language to describe the same work. e.g. ['trauma-informed care', 'wraparound services', 'housing first', 'gender-responsive programming']. Add as many as are relevant — more is better here.",
+
+  "_section_3": "PROGRAM AREAS",
+
+  "program_areas": [],
+  "_program_areas_help": "REQUIRED. List every active program area your organization runs. Must include at least one. Choose from the following exact values only — copy and paste them exactly as shown: 'housing_permanent', 'housing_transitional', 'housing_rapid_rehousing', 'domestic_violence', 'workforce_development', 'food_security', 'healthcare', 'mental_health', 'substance_use', 'reentry', 'legal_services', 'childcare', 'education', 'financial_literacy', 'general_operating'. e.g. ['housing_permanent', 'workforce_development', 'food_security']",
+
+  "program_descriptions": {},
+  "_program_descriptions_help": "OPTIONAL but strongly recommended. Plain-language descriptions of each of your programs, written the way you would describe them to a funder. Keyed by program name. The agent uses these to write more specific search queries and letter of inquiry drafts. e.g. { 'Workforce Training': 'A 12-week healthcare certification program for women who have experienced homelessness...' }",
+
+  "_section_4": "POPULATIONS SERVED",
+
+  "populations_served": [],
+  "_populations_served_help": "REQUIRED. List every population your organization serves. Must include at least one. Choose from the following exact values only: 'women', 'men', 'youth', 'seniors', 'families', 'veterans', 'lgbtq', 'immigrants', 'formerly_incarcerated', 'survivors_dv', 'chronically_homeless', 'low_income', 'disabled', 'bipoc', 'mental_health'. e.g. ['women', 'chronically_homeless', 'survivors_dv', 'low_income']",
+
+  "_section_5": "GEOGRAPHY",
+
+  "geography": {
+    "city": "",
+    "_city_help": "REQUIRED. The primary city where your organization operates. e.g. Chicago",
+
+    "state": "",
+    "_state_help": "REQUIRED. Two-letter state code. e.g. IL",
+
+    "county": null,
+    "_county_help": "OPTIONAL. County name if relevant to your funding search. e.g. Cook County",
+
+    "region": null,
+    "_region_help": "OPTIONAL. Regional descriptor used in search queries. e.g. Chicago metro, Greater Boston, Bay Area",
+
+    "national": false,
+    "_national_help": "OPTIONAL. Set to true only if your organization operates programs in multiple states nationwide. Most local nonprofits should leave this as false."
+  },
+
+  "_section_6": "BUDGET PARAMETERS",
+
+  "budget": {
+    "request_floor": null,
+    "_request_floor_help": "REQUIRED. The minimum grant amount your organization will pursue, in US dollars as a whole number. Grants smaller than this are not worth the application time. e.g. 25000 for $25,000",
+
+    "request_ceiling": null,
+    "_request_ceiling_help": "REQUIRED. The maximum grant amount your organization can realistically receive and execute, in US dollars. This must be larger than request_floor. e.g. 500000 for $500,000",
+
+    "annual_budget": null,
+    "_annual_budget_help": "OPTIONAL but recommended. Your organization's total annual operating budget in US dollars. Used to assess whether your org is the right size for a given funder. e.g. 6000000 for $6 million"
+  },
+
+  "_section_7": "FUNDER RELATIONSHIPS",
+
+  "known_funders": [],
+  "_known_funders_help": "OPTIONAL but strongly recommended. List every foundation that has funded your organization in the past 5 years. The agent flags currently open opportunities from these funders as your highest-priority leads. Each entry should follow this format: { 'name': 'Foundation Name', 'last_award_year': 2024, 'last_award_amount': 50000, 'funder_type': 'private_foundation', 'notes': 'Any relationship context' }. Valid funder_type values: 'private_foundation', 'community_foundation', 'corporate', 'government_federal', 'government_state', 'government_local', 'religious', 'public_charity', 'unknown'",
+
+  "funder_exclusions": [],
+  "_funder_exclusions_help": "OPTIONAL. List the full names of any funders you want excluded from results entirely. e.g. ['XYZ Foundation'] if you have a conflict with them or have been declined repeatedly.",
+
+  "funder_type_exclusions": [],
+  "_funder_type_exclusions_help": "OPTIONAL. List any categories of funders to exclude from results. e.g. ['government_federal'] if you want to avoid federal funding. Valid values match the funder_type list above.",
+
+  "_section_8": "AGENT SETTINGS",
+
+  "settings": {
+    "exclude_federal": true,
+    "_exclude_federal_help": "Set to true to filter out all federal government funding opportunities from results. Set to false to include them. Default is true.",
+
+    "exclude_state": false,
+    "_exclude_state_help": "Set to true to filter out all state government funding opportunities. Default is false.",
+
+    "deadline_floor_days": 14,
+    "_deadline_floor_help": "Minimum number of days until a deadline for an opportunity to appear in results. Opportunities closing sooner than this are excluded — not enough time to prepare. Default is 14 days. Increase this if your team needs more lead time.",
+
+    "deadline_ceiling_days": 365,
+    "_deadline_ceiling_help": "Maximum number of days until a deadline. Opportunities further away than this are excluded as too distant to act on now. Default is 365 days.",
+
+    "min_composite_score": 2.0,
+    "_min_composite_score_help": "Minimum qualification score (out of 5.0) for an opportunity to appear in results. Increase this to see only stronger matches. Decrease to see more results. Default is 2.0.",
+
+    "discovery_cycle_day": "monday",
+    "_discovery_cycle_day_help": "Day of the week the weekly discovery cycle runs. Valid values: 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'. Default is monday.",
+
+    "relationship_map_day": 1,
+    "_relationship_map_day_help": "Day of the month the monthly relationship mapping cycle runs. Must be a number between 1 and 28. Default is 1 (the first of each month)."
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "org_name": "Deborah's Place",
+  "org_short_name": "Deborah's Place",
+  "ein": "36-3786883",
+  "ntee_codes": ["L41", "P20", "L80"],
+  "website": "https://www.deborahsplace.org",
+  "founded_year": 1983,
+
+  "mission_statement": "Deborah's Place provides housing, support services, and advocacy for women experiencing homelessness in Chicago, Illinois. The organization is committed to helping women achieve stability, independence, and well-being through permanent supportive housing, transitional housing, workforce development, and wraparound services.",
+
+  "mission_keywords": [
+    "permanent supportive housing",
+    "transitional housing",
+    "women experiencing homelessness",
+    "trauma-informed care",
+    "wraparound services",
+    "housing stability",
+    "gender-responsive services",
+    "economic mobility",
+    "domestic violence survivors",
+    "Chicago homeless services"
+  ],
+
+  "program_areas": [
+    "housing_permanent",
+    "housing_transitional",
+    "domestic_violence",
+    "workforce_development",
+    "food_security",
+    "mental_health",
+    "healthcare"
+  ],
+
+  "program_descriptions": {
+    "Permanent Supportive Housing": "Long-term affordable housing with wraparound support services for women who have experienced chronic homelessness, including case management, mental health support, and life skills development.",
+    "Transitional Housing": "Time-limited housing with intensive support services helping women stabilize and transition to permanent housing. Serves women coming from shelters, the street, or crisis situations.",
+    "Workforce Development": "Healthcare certification training programs equipping women with marketable skills and pathways to stable employment. Includes job placement support and career coaching.",
+    "Domestic Violence Services": "Trauma-informed support and safe housing for women fleeing domestic violence, including safety planning, advocacy, and connection to legal services.",
+    "Food Security": "On-site food pantry and meal programs ensuring women in Deborah's Place programs have consistent access to nutritious food.",
+    "Mental Health Services": "Individual and group counseling, psychiatric services, and trauma-informed mental health support integrated into all housing programs.",
+    "Healthcare Access": "Connection to primary care, preventive health services, and healthcare navigation for women who have experienced barriers to medical care."
+  },
+
+  "populations_served": [
+    "women",
+    "chronically_homeless",
+    "survivors_dv",
+    "low_income",
+    "bipoc",
+    "mental_health",
+    "disabled"
+  ],
+
+  "geography": {
+    "city": "Chicago",
+    "state": "IL",
+    "county": "Cook County",
+    "region": "Chicago metro",
+    "national": false
+  },
+
+  "budget": {
+    "request_floor": 25000,
+    "request_ceiling": 500000,
+    "annual_budget": 6000000
+  },
+
+  "known_funders": [
+    {
+      "name": "Chicago Foundation for Women",
+      "last_award_year": 2024,
+      "last_award_amount": 50000,
+      "funder_type": "community_foundation",
+      "notes": "Prior relationship through the Eleanor Network. Warm lead — highest priority."
+    },
+    {
+      "name": "Polk Bros. Foundation",
+      "last_award_year": 2023,
+      "last_award_amount": 75000,
+      "funder_type": "private_foundation",
+      "notes": "Multi-year funder. Check for open RFPs through mid-2026."
+    },
+    {
+      "name": "MacArthur Foundation",
+      "last_award_year": 2023,
+      "last_award_amount": 100000,
+      "funder_type": "private_foundation",
+      "notes": "Co-chair of Resilient Chicago Fund. Increased grantmaking in 2025-2026."
+    },
+    {
+      "name": "Joyce Foundation",
+      "last_award_year": 2022,
+      "last_award_amount": 60000,
+      "funder_type": "private_foundation",
+      "notes": "Strong alignment with economic mobility programs."
+    },
+    {
+      "name": "Chicago Community Trust",
+      "last_award_year": 2024,
+      "last_award_amount": 85000,
+      "funder_type": "community_foundation",
+      "notes": "Co-leads Resilient Chicago Fund. Active grant programs open to Chicago nonprofits."
+    }
+  ],
+
+  "funder_exclusions": [],
+
+  "funder_type_exclusions": [],
+
+  "settings": {
+    "exclude_federal": true,
+    "exclude_state": false,
+    "deadline_floor_days": 14,
+    "deadline_ceiling_days": 365,
+    "min_composite_score": 2.0,
+    "discovery_cycle_day": "monday",
+    "relationship_map_day": 1
+  }
+}
