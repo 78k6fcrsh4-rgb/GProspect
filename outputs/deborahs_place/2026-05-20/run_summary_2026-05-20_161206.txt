@@ -1,0 +1,23 @@
+============================================================
+GRANT PROSPECTING RUN SUMMARY
+Organization: Deborah's Place
+Date: May 20, 2026
+Time: 16:12:06
+============================================================
+
+Raw results found:        1
+Passed eligibility filter: 1
+Final ranked results:      1
+
+============================================================
+TOP RESULTS
+============================================================
+
+Rank 1: Bank of America Charitable Foundation
+  Program:  Stable Housing and Empowering Communities RFP
+  Score:    5.28/5
+  Deadline: June 29, 2026 (40 days)
+  Award:    Amount not specified
+  Action:   Schedule application kickoff within the next 2 weeks.
+
+============================================================
