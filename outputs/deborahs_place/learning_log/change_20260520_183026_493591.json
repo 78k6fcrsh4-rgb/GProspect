@@ -1,0 +1,12 @@
+{
+  "entry_type": "change",
+  "timestamp": "2026-05-20T18:30:26.493574",
+  "org_name": "Deborah's Place",
+  "change_type": "recommendation_logged",
+  "description": "Recommendation noted for admin review: Audit the watch list entry for ptfchicago.org to verify active crawling is enabled and check last successful crawl date",
+  "triggered_by": "gap_analyzer",
+  "details": {
+    "recommendation": "Audit the watch list entry for ptfchicago.org to verify active crawling is enabled and check last successful crawl date"
+  },
+  "entry_id": "chg_20260520183026493580"
+}

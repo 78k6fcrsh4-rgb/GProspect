@@ -1,0 +1,26 @@
+{
+  "entry_type": "submission",
+  "timestamp": "2026-05-20T18:30:26.494788",
+  "org_name": "Deborah's Place",
+  "submission": {
+    "submission_id": "24912226a5b1",
+    "funder_name": "Pritzker Traubert Foundation",
+    "program_name": "Neighborhood Opportunity Fund 2026",
+    "source_url": "https://ptfchicago.org/grants/neighborhood-opportunity-fund",
+    "submitted_by": "Mary Kelly",
+    "submitted_at": "2026-05-20T18:30:21.770808",
+    "deadline": "2026-09-01",
+    "award_range": "$50,000 - $150,000",
+    "eligibility": "Chicago nonprofits serving low-income communities",
+    "notes": "Found through a partner organization newsletter. Not in agent results.",
+    "funder_website": "https://ptfchicago.org",
+    "org_name": "Deborah's Place",
+    "already_found": false,
+    "tags": []
+  },
+  "learned": "The rule check confirms that ptfchicago.org is in the watch list and keywords cover this funder, yet the grant was still missed and discovered through a partner newsletter instead. This indicates a technical monitoring failure rather than a search or keyword gap. The most likely cause is that the agent's web monitoring is not actively crawling the Pritzker Traubert Foundation website or is not detecting new grant program pages once they're published. The Neighborhood Opportunity Fund 2026 appears to be a newly posted program that the agent's current monitoring protocol failed to surface, despite the domain being theoretically covered.",
+  "changes_made": [
+    "Identified 3 new search keywords to improve coverage: Neighborhood Opportunity Fund, Pritzker Traubert Foundation grants, Chicago neighborhood funding."
+  ],
+  "entry_id": "sub_20260520183026494796"
+}

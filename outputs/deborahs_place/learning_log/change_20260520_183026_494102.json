@@ -1,0 +1,12 @@
+{
+  "entry_type": "change",
+  "timestamp": "2026-05-20T18:30:26.494089",
+  "org_name": "Deborah's Place",
+  "change_type": "recommendation_logged",
+  "description": "Recommendation noted for admin review: Increase crawl frequency for ptfchicago.org from current schedule to weekly or bi-weekly given the foundation's local relevance and active grant cycle",
+  "triggered_by": "gap_analyzer",
+  "details": {
+    "recommendation": "Increase crawl frequency for ptfchicago.org from current schedule to weekly or bi-weekly given the foundation's local relevance and active grant cycle"
+  },
+  "entry_id": "chg_20260520183026494093"
+}

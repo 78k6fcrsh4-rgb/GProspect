@@ -1,0 +1,12 @@
+{
+  "entry_type": "change",
+  "timestamp": "2026-05-20T18:30:26.493755",
+  "org_name": "Deborah's Place",
+  "change_type": "recommendation_logged",
+  "description": "Recommendation noted for admin review: Add /grants/ page specifically to the monitoring crawl path for this funder, as new programs may be posted in subdirectories",
+  "triggered_by": "gap_analyzer",
+  "details": {
+    "recommendation": "Add /grants/ page specifically to the monitoring crawl path for this funder, as new programs may be posted in subdirectories"
+  },
+  "entry_id": "chg_20260520183026493759"
+}

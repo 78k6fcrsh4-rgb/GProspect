@@ -1,0 +1,16 @@
+{
+  "entry_type": "change",
+  "timestamp": "2026-05-20T18:30:26.493319",
+  "org_name": "Deborah's Place",
+  "change_type": "keywords_identified",
+  "description": "Identified 3 new search keywords to improve coverage: Neighborhood Opportunity Fund, Pritzker Traubert Foundation grants, Chicago neighborhood funding.",
+  "triggered_by": "gap_analyzer",
+  "details": {
+    "keywords": [
+      "Neighborhood Opportunity Fund",
+      "Pritzker Traubert Foundation grants",
+      "Chicago neighborhood funding"
+    ]
+  },
+  "entry_id": "chg_20260520183026493333"
+}
