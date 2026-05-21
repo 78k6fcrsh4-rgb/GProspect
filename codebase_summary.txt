@@ -1,0 +1,865 @@
+=== GRANT PROSPECTING TOOL - PROJECT STRUCTURE ===
+.
+./codebase_summary.txt
+./app
+./app/components
+./app/components/grant_card.py
+./app/components/__init__.py
+./app/components/navigation.py
+./app/main.py
+./app/pages
+./app/pages/home.py
+./app/pages/run_agent.py
+./app/pages/profile.py
+./app/pages/__init__.py
+./app/pages/dashboard.py
+./app/pages/admin.py
+./app/pages/login.py
+./app/pages/manual_input.py
+./requirements.txt
+./utils
+./utils/db.py
+./utils/config.py
+./utils/llm_enrich.py
+./backend
+./backend/auth.py
+./backend/profile_manager.py
+./backend/ingestors
+./backend/ingestors/demo_feed.py
+./backend/ingestors/__init__.py
+./backend/ingestors/grantmakers_io.py
+./backend/ingestors/grants_gov.py
+./backend/ingestors/pnd_rss.py
+./backend/ingestors/propublica_990.py
+./backend/classifier.py
+./backend/matcher.py
+./backend/manual_input_handler.py
+./backend/opportunity_store.py
+./backend/grant_agent.py
+./backend/email_alerts.py
+./supabase
+./supabase/schema.sql
+./README.md
+./scripts
+./scripts/verify_setup.py
+./scripts/seed_pilot_orgs.py
+
+
+=== STREAMLIT UI CODE ===
+
+--- File: app/main.py ---
+"""Grant Prospecting Tool — Streamlit entry point."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import streamlit as st
+
+from app.components.navigation import run_navigation
+from backend.auth import get_user_by_id, verify_session_token
+from utils.db import init_db
+
+st.set_page_config(
+    page_title="Grant Prospecting Tool",
+    page_icon="📋",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+init_db()
+
+if "user" not in st.session_state:
+    st.session_state.user = None
+if "org_id" not in st.session_state:
+    st.session_state.org_id = None
+
+token = st.session_state.get("session_token")
+if token and not st.session_state.user:
+    uid = verify_session_token(token)
+    if uid:
+        st.session_state.user = get_user_by_id(uid)
+        if st.session_state.user and st.session_state.user.get("org_id"):
+            st.session_state.org_id = st.session_state.user["org_id"]
+
+run_navigation()
+
+--- File: app/components/__init__.py ---
+
+--- File: app/components/grant_card.py ---
+"""Reusable grant opportunity card."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import streamlit as st
+
+from backend.classifier import temperature_label
+
+TEMP_COLORS = {
+    "hot": "#c0392b",
+    "warm": "#d68910",
+    "less_warm": "#2874a6",
+}
+
+
+def render_grant_card(opp: dict[str, Any]) -> None:
+    temp = opp.get("temperature", "warm")
+    color = TEMP_COLORS.get(temp, "#333")
+    label = temperature_label(temp)
+
+    st.markdown(
+        f'<div style="border-left: 4px solid {color}; padding-left: 12px; margin-bottom: 8px;">'
+        f'<strong style="color:{color};">[{label}]</strong> '
+        f'<strong>{opp.get("foundation_name", "Grant")}</strong></div>',
+        unsafe_allow_html=True,
+    )
+
+    if opp.get("description"):
+        st.caption(opp["description"][:400] + ("…" if len(opp.get("description", "")) > 400 else ""))
+
+    cols = st.columns(3)
+    with cols[0]:
+        if opp.get("deadline"):
+            st.write(f"**Deadline:** {opp['deadline']}")
+        else:
+            st.write("**Deadline:** Not listed")
+    with cols[1]:
+        amt_min, amt_max = opp.get("amount_min"), opp.get("amount_max")
+        if amt_min or amt_max:
+            st.write(f"**Amount:** ${_fmt(amt_min)} – ${_fmt(amt_max)}")
+    with cols[2]:
+        st.write(f"**Score:** {opp.get('match_score', 0)}")
+
+    if opp.get("match_explanation"):
+        st.info(opp["match_explanation"])
+
+    meta = st.columns(2)
+    with meta[0]:
+        st.write(f"Source: {opp.get('source', '—')}")
+    with meta[1]:
+        if opp.get("url"):
+            st.link_button("View opportunity", opp["url"], use_container_width=True)
+
+    st.divider()
+
+
+def _fmt(val: Any) -> str:
+    if val is None:
+        return "?"
+    try:
+        return f"{int(val):,}"
+    except (TypeError, ValueError):
+        return str(val)
+
+--- File: app/components/navigation.py ---
+"""Sidebar navigation with Menu title and page links."""
+
+from __future__ import annotations
+
+import streamlit as st
+
+from app.pages import admin, dashboard, home, login, manual_input, profile, run_agent
+
+# Runs in the app frame (Chrome-friendly). Reorders Menu to top and collapses sidebar on nav click.
+_SIDEBAR_JS = """
+<script>
+(function () {
+  const doc = window.parent && window.parent.document ? window.parent.document : document;
+
+  function sidebar() {
+    return doc.querySelector('section[data-testid="stSidebar"]');
+  }
+
+  function sidebarContent() {
+    return doc.querySelector('[data-testid="stSidebarUserContent"]');
+  }
+
+  function moveMenuToTop() {
+    const content = sidebarContent();
+    const header = doc.getElementById("grant-menu-header");
+    const user = doc.getElementById("grant-menu-user");
+    if (!content || !header) return;
+    if (content.firstChild !== header) {
+      content.insertBefore(header, content.firstChild);
+    }
+    if (user && user.parentElement === content) {
+      const after = header.nextElementSibling;
+      if (after !== user) {
+        content.insertBefore(user, header.nextElementSibling);
+      }
+    }
+  }
+
+  function collapseSidebar() {
+    const sb = sidebar();
+    if (!sb || sb.getAttribute("aria-expanded") === "false") return;
+
+    const selectors = [
+      '[data-testid="stSidebarCollapseButton"]',
+      '[data-testid="collapsedControl"]',
+      '[aria-label="Collapse sidebar"]',
+      '[aria-label="Close sidebar"]',
+    ];
+    for (const sel of selectors) {
+      const btn = doc.querySelector(sel);
+      if (btn) {
+        btn.click();
+        return;
+      }
+    }
+    const headerBtn = doc.querySelector('[data-testid="stSidebarHeader"] button');
+    if (headerBtn) headerBtn.click();
+  }
+
+  function isCollapseControl(el) {
+    return !!el.closest(
+      '[data-testid="stSidebarCollapseButton"], [data-testid="collapsedControl"], ' +
+      '[data-testid="stSidebarHeader"] button, [aria-label="Collapse sidebar"]'
+    );
+  }
+
+  function bindSidebarClicks() {
+    const sb = sidebar();
+    if (!sb || sb.getAttribute("data-grant-sidebar-bound") === "1") return;
+    sb.setAttribute("data-grant-sidebar-bound", "1");
+
+    sb.addEventListener(
+      "click",
+      (e) => {
+        if (isCollapseControl(e.target)) return;
+        if (e.target.closest("#grant-menu-header, #grant-menu-user")) return;
+
+        const content = sidebarContent();
+        if (!content || !content.contains(e.target)) return;
+
+        const navHit = e.target.closest(
+          'a, button, [role="button"], [data-testid*="Nav"], li, span'
+        );
+        if (!navHit) return;
+
+        const navRoot =
+          navHit.closest('[data-testid="stSidebarNav"]') ||
+          navHit.closest('[data-testid="stSidebarNavigation"]') ||
+          navHit.closest("nav") ||
+          navHit.closest("ul");
+
+        if (navRoot || navHit.tagName === "A" || navHit.tagName === "BUTTON") {
+          setTimeout(collapseSidebar, 300);
+        }
+      },
+      true
+    );
+  }
+
+  function tick() {
+    moveMenuToTop();
+    bindSidebarClicks();
+  }
+
+  tick();
+  setTimeout(tick, 100);
+  setTimeout(tick, 500);
+
+  const observer = new MutationObserver(() => tick());
+  observer.observe(doc.body, { childList: true, subtree: true });
+})();
+</script>
+"""
+
+
+def _page_list() -> list[st.Page]:
+    pages: list[st.Page] = [
+        st.Page(home.render, title="Main", icon="🏠", default=True, url_path="main"),
+        st.Page(dashboard.render, title="Dashboard", icon="📊", url_path="dashboard"),
+        st.Page(profile.render, title="Profile", icon="🏢", url_path="profile"),
+        st.Page(
+            manual_input.render,
+            title="Manual Input",
+            icon="✏️",
+            url_path="manual-input",
+        ),
+        st.Page(run_agent.render, title="Run Agent", icon="🔄", url_path="run-agent"),
+        st.Page(login.render, title="Login", icon="🔐", url_path="login"),
+    ]
+    user = st.session_state.get("user")
+    if user and user.get("role") == "admin":
+        pages.append(st.Page(admin.render, title="Admin", icon="⚙️", url_path="admin"))
+    return pages
+
+
+def _inject_sidebar_behavior() -> None:
+    # Hidden iframe (replaces deprecated st.components.v1.html)
+    doc = f"<!DOCTYPE html><html><body style='margin:0;padding:0;'>{_SIDEBAR_JS}</body></html>"
+    st.iframe(doc, width=0, height=0)
+
+
+def run_navigation() -> None:
+    with st.sidebar:
+        st.markdown(
+            '<div id="grant-menu-header"><h2>Menu</h2></div>',
+            unsafe_allow_html=True,
+        )
+        user = st.session_state.get("user")
+        if user:
+            st.markdown(
+                f'<div id="grant-menu-user">Signed in as {user.get("email", "")}</div>',
+                unsafe_allow_html=True,
+            )
+
+    pg = st.navigation(_page_list(), position="sidebar", expanded=True)
+    pg.run()
+    _inject_sidebar_behavior()
+--- File: app/pages/__init__.py ---
+"""Streamlit pages."""
+
+--- File: app/pages/admin.py ---
+"""Admin: user list and quick org overview."""
+
+from __future__ import annotations
+
+import streamlit as st
+
+from backend.auth import list_users
+from backend.profile_manager import list_profiles
+
+
+def render() -> None:
+    st.header("Admin")
+
+    user = st.session_state.get("user")
+    if user and user.get("role") != "admin":
+        st.error("Admin access only.")
+        return
+
+    st.subheader("Organizations")
+    for p in list_profiles():
+        st.write(f"- **{p['name']}** (id={p['id']}) — {p.get('geographic_focus', '')}")
+
+    st.subheader("Users")
+    users = list_users()
+    if not users:
+        st.write("No users yet. Register under Login.")
+    for u in users:
+        st.write(f"- {u['email']} — {u['role']} (org_id={u.get('org_id')})")
+
+--- File: app/pages/dashboard.py ---
+"""Dashboard: Act Now / Coming Up / Prospects."""
+
+from __future__ import annotations
+
+import streamlit as st
+
+from app.components.grant_card import render_grant_card
+from backend.opportunity_store import list_opportunities
+from backend.profile_manager import list_profiles
+from utils.config import MIN_MATCH_SCORE
+
+
+def render() -> None:
+    st.header("Grant Dashboard")
+
+    org_id = st.session_state.get("org_id")
+    profiles = list_profiles()
+
+    if not profiles:
+        st.warning("No organization profile yet. Add one under **Profile** in the Menu.")
+        return
+
+    if not org_id:
+        options = {p["name"]: p["id"] for p in profiles}
+        choice = st.selectbox("Select organization", list(options.keys()))
+        org_id = options[choice]
+        st.session_state.org_id = org_id
+
+    tab_hot, tab_warm, tab_less = st.tabs(
+        ["Act Now", "Coming Up", "Prospects / Historical"]
+    )
+
+    with tab_hot:
+        st.subheader("Act Now — deadlines within 2 weeks")
+        hot = list_opportunities(org_id, temperature="hot", min_score=MIN_MATCH_SCORE)
+        if not hot:
+            st.write("No hot leads yet. Run the agent or add opportunities manually.")
+        for opp in hot:
+            render_grant_card(opp)
+
+    with tab_warm:
+        st.subheader("Coming Up — deadlines 2–8 weeks out")
+        warm = list_opportunities(org_id, temperature="warm", min_score=MIN_MATCH_SCORE)
+        if not warm:
+            st.write("No warm leads yet.")
+        for opp in warm:
+            render_grant_card(opp)
+
+    with tab_less:
+        st.subheader("Prospects & historical funders")
+        less = list_opportunities(org_id, temperature="less_warm", min_score=MIN_MATCH_SCORE)
+        if not less:
+            st.write("No prospect leads yet.")
+        for opp in less:
+            render_grant_card(opp)
+
+--- File: app/pages/home.py ---
+"""Main / home page."""
+
+from __future__ import annotations
+
+import streamlit as st
+
+from backend.profile_manager import list_profiles
+
+
+def render() -> None:
+    st.header("Grant Prospecting Tool")
+    st.write(
+        "Find and track grant opportunities matched to your nonprofit profile. "
+        "Use the **Menu** in the sidebar to open each section."
+    )
+
+    profiles = list_profiles()
+    if profiles:
+        st.subheader("Your organizations")
+        for p in profiles:
+            st.write(f"- **{p['name']}** — {p.get('geographic_focus', '')}")
+        st.info("Open **Dashboard** to view leads, or **Run Agent** to refresh results.")
+    else:
+        st.warning("No organization profile yet. Open **Profile** to add one.")
+
+--- File: app/pages/login.py ---
+"""Login and registration."""
+
+from __future__ import annotations
+
+import streamlit as st
+
+from backend.auth import authenticate, create_user, make_session_token
+from backend.profile_manager import list_profiles
+
+
+def render() -> None:
+    st.header("Login")
+
+    tab_in, tab_up = st.tabs(["Sign in", "Register (admin setup)"])
+
+    with tab_in:
+        with st.form("login"):
+            email = st.text_input("Email")
+            password = st.text_input("Password", type="password")
+            submit = st.form_submit_button("Sign in")
+        if submit:
+            user = authenticate(email, password)
+            if user:
+                st.session_state.user = user
+                st.session_state.session_token = make_session_token(user["id"])
+                if user.get("org_id"):
+                    st.session_state.org_id = user["org_id"]
+                st.success("Signed in.")
+                st.rerun()
+            else:
+                st.error("Invalid email or password.")
+
+    with tab_up:
+        st.caption("First-time setup: create an admin account for your team.")
+        profiles = list_profiles()
+        with st.form("register"):
+            email = st.text_input("Email", key="reg_email")
+            password = st.text_input("Password", type="password", key="reg_pw")
+            role = st.selectbox("Role", ["admin", "basic_user"])
+            org_choice = None
+            if profiles:
+                org_map = {p["name"]: p["id"] for p in profiles}
+                org_choice = st.selectbox(
+                    "Link to organization",
+                    list(org_map.keys()),
+                )
+            submit_reg = st.form_submit_button("Create account")
+        if submit_reg:
+            org_id = None
+            if profiles and org_choice:
+                org_id = {p["name"]: p["id"] for p in profiles}[org_choice]
+            try:
+                create_user(email, password, role=role, org_id=org_id)
+                st.success("Account created. Sign in above.")
+            except Exception as e:
+                st.error(f"Could not create account: {e}")
+
+    if st.session_state.get("user"):
+        if st.button("Sign out"):
+            st.session_state.user = None
+            st.session_state.session_token = None
+            st.rerun()
+
+--- File: app/pages/manual_input.py ---
+"""Manual opportunity entry."""
+
+from __future__ import annotations
+
+import streamlit as st
+
+from backend.manual_input_handler import add_manual_opportunity
+from backend.profile_manager import list_profiles
+
+
+def render() -> None:
+    st.header("Add Opportunity Manually")
+
+    profiles = list_profiles()
+    if not profiles:
+        st.warning("Create an organization profile first.")
+        return
+
+    org_id = st.session_state.get("org_id")
+    if not org_id:
+        options = {p["name"]: p["id"] for p in profiles}
+        choice = st.selectbox("Organization", list(options.keys()))
+        org_id = options[choice]
+        st.session_state.org_id = org_id
+
+    with st.form("manual_opp"):
+        foundation_name = st.text_input("Foundation / grant name *")
+        description = st.text_area("Opportunity description")
+        deadline = st.text_input("Deadline (YYYY-MM-DD)", placeholder="2026-06-01")
+        url = st.text_input("Application URL")
+        how_heard = st.text_input("How did you hear about this?")
+        source = st.text_input("Source", value="Manual entry")
+        submitted = st.form_submit_button("Add to dashboard")
+
+    if submitted:
+        if not foundation_name.strip():
+            st.error("Foundation name is required.")
+            return
+        add_manual_opportunity(
+            org_id,
+            {
+                "foundation_name": foundation_name.strip(),
+                "description": description,
+                "deadline": deadline or None,
+                "url": url,
+                "how_heard": how_heard,
+                "source": source,
+            },
+        )
+        st.success("Opportunity added. See the Dashboard.")
+
+--- File: app/pages/profile.py ---
+"""Organization profile form."""
+
+from __future__ import annotations
+
+import streamlit as st
+
+from backend.profile_manager import create_profile, get_profile, list_profiles, update_profile
+
+
+def render() -> None:
+    st.header("Organization Profile")
+
+    user = st.session_state.get("user")
+    is_admin = not user or user.get("role") == "admin"
+
+    profiles = list_profiles()
+    org_id = st.session_state.get("org_id")
+
+    if profiles:
+        options = {"(New organization)": None}
+        options.update({p["name"]: p["id"] for p in profiles})
+        selected = st.selectbox("Organization", list(options.keys()))
+        org_id = options[selected]
+        st.session_state.org_id = org_id
+
+    existing = get_profile(org_id) if org_id else None
+
+    with st.form("org_profile"):
+        name = st.text_input("Organization name *", value=(existing or {}).get("name", ""))
+        mission = st.text_area("Mission", value=(existing or {}).get("mission", ""))
+        program_areas = st.text_input(
+            "Program areas (comma-separated)",
+            value=(existing or {}).get("program_areas", ""),
+        )
+        geographic_focus = st.text_input(
+            "Geographic focus",
+            value=(existing or {}).get("geographic_focus", ""),
+            placeholder="e.g. Chicago, IL",
+        )
+        population_served = st.text_input(
+            "Population served",
+            value=(existing or {}).get("population_served", ""),
+        )
+        c1, c2 = st.columns(2)
+        with c1:
+            grant_min = st.number_input(
+                "Typical grant request (min $)",
+                min_value=0,
+                value=int((existing or {}).get("grant_request_min") or 5000),
+                step=1000,
+            )
+        with c2:
+            grant_max = st.number_input(
+                "Typical grant request (max $)",
+                min_value=0,
+                value=int((existing or {}).get("grant_request_max") or 250000),
+                step=1000,
+            )
+        ein = st.text_input("EIN (optional)", value=(existing or {}).get("ein", ""))
+        keywords = st.text_input(
+            "Extra keywords (comma-separated)",
+            value=(existing or {}).get("keywords", ""),
+        )
+        alert_email = st.text_input(
+            "Alert email for hot leads",
+            value=(existing or {}).get("alert_email", ""),
+        )
+
+        submitted = st.form_submit_button("Save profile", disabled=not is_admin)
+
+    if submitted:
+        if not name.strip():
+            st.error("Organization name is required.")
+            return
+        data = {
+            "name": name.strip(),
+            "mission": mission,
+            "program_areas": program_areas,
+            "geographic_focus": geographic_focus,
+            "population_served": population_served,
+            "grant_request_min": int(grant_min),
+            "grant_request_max": int(grant_max),
+            "ein": ein,
+            "keywords": keywords,
+            "alert_email": alert_email,
+        }
+        if org_id:
+            update_profile(org_id, data)
+            st.success("Profile updated.")
+        else:
+            new_id = create_profile(data)
+            st.session_state.org_id = new_id
+            st.success(f"Profile created (id={new_id}).")
+
+--- File: app/pages/run_agent.py ---
+"""Manual trigger for grant agent (local / admin)."""
+
+from __future__ import annotations
+
+import streamlit as st
+
+from backend.grant_agent import run_agent
+
+
+def render() -> None:
+    st.header("Run Grant Agent")
+    st.write(
+        "Fetches opportunities from free public sources, scores them against your "
+        "organization profile, and updates the dashboard."
+    )
+
+    if st.button("Run now", type="primary"):
+        with st.spinner("Running agent…"):
+            stats = run_agent()
+        st.success(f"Done: {stats}")
+
+
+=== CONFIGURATION & UTILITY FILES ===
+
+--- File: requirements.txt ---
+streamlit>=1.36.0
+feedparser>=6.0.11
+requests>=2.31.0
+python-dotenv>=1.0.1
+pandas>=2.2.0
+psycopg2-binary>=2.9.9
+sendgrid>=6.11.0
+
+--- File: README.md ---
+# Grant Prospecting Tool
+
+Free, automated grant prospecting for US nonprofits. Ingests public grant listings, scores them against your organization profile, and surfaces **Act Now**, **Coming Up**, and **Prospect / Historical** leads—no paid subscriptions required for end users.
+
+## Features
+
+- Organization profile (mission, programs, geography, grant size range)
+- Free data sources: Philanthropy News Digest RSS, Grants.gov, ProPublica 990, Grantmakers.io
+- Rule-based matching and deadline classification (hot / warm / less warm)
+- Streamlit dashboard, manual entry, optional email alerts (SendGrid free tier)
+- Daily automation via GitHub Actions
+- SQLite locally; Postgres (Supabase) for hosted deploy
+
+## Quick start (local)
+
+```bash
+cd grant-prospecting-tool
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+
+# Seed pilot orgs and run agent once
+python scripts/seed_pilot_orgs.py
+
+# Launch app
+streamlit run app/main.py
+```
+
+Open http://localhost:8501 → **Organization Profile** → **Run Agent** → **Dashboard**.
+
+Default admin (after seed): `admin@example.org` / `changeme123`
+
+## Environment variables
+
+See [.env.example](.env.example). For local dev, no keys are required.
+
+| Variable | Purpose |
+|----------|---------|
+| `DATABASE_URL` | Postgres connection string (Supabase). Empty = SQLite in `data/` |
+| `SENDGRID_API_KEY` | Hot-lead email alerts |
+| `SENDGRID_FROM_EMAIL` | Verified sender in SendGrid |
+| `APP_SECRET_KEY` | Session signing |
+| `ANTHROPIC_API_KEY` | Optional BYOK match explanations |
+
+## Deploy on Streamlit Community Cloud
+
+1. Push this repo to GitHub (public repo for free tier).
+2. [share.streamlit.io](https://share.streamlit.io) → New app → select repo.
+3. Main file path: `app/main.py`
+4. Add secrets (Settings → Secrets):
+
+```toml
+DATABASE_URL = "postgresql://..."
+APP_SECRET_KEY = "long-random-string"
+SENDGRID_API_KEY = "..."
+SENDGRID_FROM_EMAIL = "alerts@yourdomain.com"
+```
+
+5. Run [supabase/schema.sql](supabase/schema.sql) in Supabase SQL editor.
+6. Use the **connection pooling** URI (port 6543) for `DATABASE_URL`.
+
+## GitHub Actions (daily agent)
+
+Add repository secrets: `DATABASE_URL`, `SENDGRID_*`, `APP_SECRET_KEY`.
+
+Workflow: [.github/workflows/daily_agent.yml](.github/workflows/daily_agent.yml) — runs daily at 08:00 UTC and supports manual dispatch.
+
+## Project structure
+
+```
+app/              Streamlit UI
+backend/          Agent, matching, ingestors, auth
+utils/            Config and database
+scripts/          Seed and utilities
+supabase/         Postgres schema
+data/             Local SQLite (gitignored)
+```
+
+## Pilot organizations
+
+`scripts/seed_pilot_orgs.py` loads:
+
+- **Deborah's Place** — Chicago homelessness services
+- **Green Valley Food Bank** — Minnesota food security
+
+Run the agent and compare dashboards to confirm profile-driven results differ.
+
+## License
+
+MIT — use and adapt freely for nonprofit grant prospecting.
+
+--- File: scripts/seed_pilot_orgs.py ---
+"""Seed pilot nonprofit profiles and run agent once."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from backend.auth import create_user, get_user_by_email
+from backend.grant_agent import run_agent
+from backend.profile_manager import create_profile, list_profiles
+
+DEBORAHS_PLACE = {
+    "name": "Deborah's Place",
+    "mission": (
+        "Ending homelessness for women in Chicago through housing, supportive "
+        "services, and advocacy."
+    ),
+    "program_areas": "housing, homelessness, behavioral health, workforce, advocacy",
+    "geographic_focus": "Chicago, IL",
+    "population_served": "Women experiencing homelessness",
+    "grant_request_min": 10000,
+    "grant_request_max": 150000,
+    "ein": "",
+    "keywords": "homeless, shelter, supportive housing, Chicago, women",
+    "alert_email": "grants@example.org",
+}
+
+SECOND_ORG = {
+    "name": "Green Valley Food Bank",
+    "mission": "Alleviating hunger and building food security in rural Minnesota communities.",
+    "program_areas": "food security, nutrition, community gardens, SNAP outreach",
+    "geographic_focus": "Minnesota, rural",
+    "population_served": "Low-income families and seniors",
+    "grant_request_min": 5000,
+    "grant_request_max": 75000,
+    "ein": "",
+    "keywords": "food bank, hunger, nutrition, Minnesota",
+    "alert_email": "development@example.org",
+}
+
+
+def seed() -> None:
+    existing = {p["name"]: p["id"] for p in list_profiles()}
+    for data in (DEBORAHS_PLACE, SECOND_ORG):
+        if data["name"] not in existing:
+            oid = create_profile(data)
+            print(f"Created org: {data['name']} (id={oid})")
+        else:
+            print(f"Org exists: {data['name']}")
+
+    if not get_user_by_email("admin@example.org"):
+        org_id = list_profiles()[0]["id"] if list_profiles() else None
+        create_user("admin@example.org", "changeme123", role="admin", org_id=org_id)
+        print("Created admin@example.org / changeme123 (change after first login)")
+
+    stats = run_agent()
+    print(f"Agent stats: {stats}")
+
+
+if __name__ == "__main__":
+    seed()
+
+--- File: scripts/verify_setup.py ---
+"""Quick sanity check for local install."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from backend.opportunity_store import list_opportunities
+from backend.profile_manager import list_profiles
+
+
+def main() -> None:
+    profiles = list_profiles()
+    assert profiles, "No organizations — run scripts/seed_pilot_orgs.py"
+    for p in profiles:
+        n = len(list_opportunities(p["id"], min_score=0))
+        assert n >= 5, f"{p['name']} has only {n} opportunities (expected >= 5)"
+        print(f"OK {p['name']}: {n} opportunities")
+    print("All checks passed.")
+
+
+if __name__ == "__main__":
+    main()
