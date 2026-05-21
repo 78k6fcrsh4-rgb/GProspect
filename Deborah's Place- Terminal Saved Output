@@ -1,0 +1,85 @@
+Last login: Mon May 18 11:54:06 on ttys005
+sanim777@Lindseys-MacBook ~ % cd /Users/sanim777/grant-prospecting-tool
+sanim777@Lindseys-MacBook grant-prospecting-tool % pwd
+/Users/sanim777/grant-prospecting-tool
+sanim777@Lindseys-MacBook grant-prospecting-tool % source .venv/bin/activate
+
+(.venv) sanim777@Lindseys-MacBook grant-prospecting-tool % python scripts/verify_setup.py
+
+OK Deborah's Place: 10 opportunities
+OK Green Valley Food Bank: 11 opportunities
+All checks passed.
+(.venv) sanim777@Lindseys-MacBook grant-prospecting-tool % streamlit run app/main.py
+
+Collecting usage statistics. To deactivate, set browser.gatherUsageStats to false.
+
+2026-05-18 12:00:51.583 Uvicorn server started on 0.0.0.0:8501
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8501
+  Network URL: http://10.166.158.199:8501
+  External URL: http://12.4.250.146:8501
+
+  For better performance, install the Watchdog module:
+
+  $ xcode-select --install
+  $ pip install watchdog
+            
+2026-05-18 12:26:52.433 Received event for non-watched path: /Users/sanim777/grant-prospecting-tool/app/pages/dashboard.py
+2026-05-18 12:28:30.044 Uncaught app execution
+Traceback (most recent call last):
+  File "/Users/sanim777/grant-prospecting-tool/.venv/lib/python3.14/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "/Users/sanim777/grant-prospecting-tool/.venv/lib/python3.14/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 687, in code_to_exec
+    _mpa_v1(self._main_script_path)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sanim777/grant-prospecting-tool/.venv/lib/python3.14/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 166, in _mpa_v1
+    page.run()
+    ~~~~~~~~^^
+  File "/Users/sanim777/grant-prospecting-tool/.venv/lib/python3.14/site-packages/streamlit/navigation/page.py", line 490, in run
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sanim777/grant-prospecting-tool/app/main.py", line 40, in <module>
+    run_navigation()
+    ~~~~~~~~~~~~~~^^
+  File "/Users/sanim777/grant-prospecting-tool/app/components/navigation.py", line 32, in run_navigation
+    pg = st.navigation(_page_list(), position="sidebar", expanded=True)
+  File "/Users/sanim777/grant-prospecting-tool/.venv/lib/python3.14/site-packages/streamlit/runtime/metrics_util.py", line 698, in wrapped_func
+    result = non_optional_func(*args, **kwargs)
+  File "/Users/sanim777/grant-prospecting-tool/.venv/lib/python3.14/site-packages/streamlit/commands/navigation.py", line 329, in navigation
+    return _navigation(pages, position=position, expanded=expanded)
+  File "/Users/sanim777/grant-prospecting-tool/.venv/lib/python3.14/site-packages/streamlit/commands/navigation.py", line 393, in _navigation
+    raise StreamlitAPIException(
+    ...<3 lines>...
+    )
+streamlit.errors.StreamlitAPIException: Multiple Pages specified with URL pathname render. URL pathnames must be unique. The url pathname may be inferred from the filename, callable name, or title.
+cd /Users/sanim777/grant-prospecting-tool
+source .venv/bin/activate
+pip install -r requirements.txt
+streamlit run app/main.py
+cd /Users/sanim777/grant-prospecting-tool
+cd /Users/sanim777/grant-prospecting-tool
+source .venv/bin/activate
+2026-05-18 12:29:48.672 Uncaught app execution
+Traceback (most recent call last):
+  File "/Users/sanim777/grant-prospecting-tool/.venv/lib/python3.14/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "/Users/sanim777/grant-prospecting-tool/.venv/lib/python3.14/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 689, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sanim777/grant-prospecting-tool/app/main.py", line 40, in <module>
+    run_navigation()
+    ~~~~~~~~~~~~~~^^
+  File "/Users/sanim777/grant-prospecting-tool/app/components/navigation.py", line 32, in run_navigation
+    pg = st.navigation(_page_list(), position="sidebar", expanded=True)
+  File "/Users/sanim777/grant-prospecting-tool/.venv/lib/python3.14/site-packages/streamlit/runtime/metrics_util.py", line 698, in wrapped_func
+    result = non_optional_func(*args, **kwargs)
+  File "/Users/sanim777/grant-prospecting-tool/.venv/lib/python3.14/site-packages/streamlit/commands/navigation.py", line 329, in navigation
+    return _navigation(pages, position=position, expanded=expanded)
+  File "/Users/sanim777/grant-prospecting-tool/.venv/lib/python3.14/site-packages/streamlit/commands/navigation.py", line 393, in _navigation
+    raise StreamlitAPIException(
+    ...<3 lines>...
+    )
+streamlit.errors.StreamlitAPIException: Multiple Pages specified with URL pathname render. URL pathnames must be unique. The url pathname may be inferred from the filename, callable name, or title.
+
