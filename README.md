@@ -68,7 +68,8 @@ Copy `.env.example` (in the parent `AI4GSH/` folder) to `lsrmba777/.env` and fil
 | `ADMIN_PASSWORD` | No | First-run admin password (default: `ChangeMe123!`) |
 | `ADMIN_NAME` | No | First-run admin display name |
 | `ADMIN_ORG` | No | First-run admin organization name |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | No | JWT lifetime (default 480 = 8 hours) |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | No | JWT lifetime in minutes (default 60). Set higher only if you understand the blast radius of a stolen token. |
+| `RATE_LIMIT_STORAGE_URI` | No | Storage backend for slowapi (default `memory://`). For multi-worker deployments, point at Redis: `redis://localhost:6379/0`. |
 | `DATABASE_URL` | No | Postgres URL. Empty = local SQLite at `./grant_prospector.db` |
 | `CORS_ALLOWED_ORIGINS` | For browser frontends | Comma-separated origin whitelist, e.g. `https://portal.example.org,https://app.example.org`. Enables `allow_credentials`. |
 | `CORS_ALLOW_ALL` | Local dev only | Set to `1` to allow `*` (forces `allow_credentials=False`). Logs a warning at startup. |
@@ -99,6 +100,20 @@ outputs/      Where run_agent.py writes its result files and the
 - `SECRET_KEY` controls JWT signing. If unset (or left at the placeholder string), the portal will generate an **ephemeral** random key at startup and warn loudly. JWTs will be invalidated on every restart and the deployment is not safe. Always set `SECRET_KEY` to a long random string before exposing the portal anywhere.
 - The seeded admin password (`ChangeMe123!`) is intentionally embarrassing. Change it on first login.
 - CORS is now environment-driven. With neither `CORS_ALLOWED_ORIGINS` nor `CORS_ALLOW_ALL` set, no cross-origin requests are accepted; same-origin still works. The dev escape hatch `CORS_ALLOW_ALL=1` forces `allow_credentials=False` so the `*`-with-credentials misconfiguration is impossible.
+
+## Auth hardening — round 3 (2026-05-23)
+
+The remaining P0 items from the code review. After this, all five P0s are closed.
+
+**1. `/auth/login` is rate-limited.** Added `slowapi` and a shared `Limiter` (`portal/limiter.py`). Login is capped at **5 attempts per minute per source IP**; `/auth/change-password` at **10 per hour per IP**. Both return HTTP 429 when exceeded. Defaults to in-memory storage; set `RATE_LIMIT_STORAGE_URI` to a Redis URL for multi-worker deployments — otherwise each worker has its own counter.
+
+**2. `/auth/logout` actually invalidates tokens.** `User` gained a `token_version` integer column. Every issued JWT carries that value as the `tv` claim, and `get_current_user` rejects any token whose `tv` doesn't match the user's current `token_version`. Logout increments the column — every outstanding JWT for that user is invalid on the next request. Tokens issued before this change (no `tv` claim) default to version 0 and survive deployment until they expire naturally.
+
+**3. Default access-token lifetime reduced from 8 hours to 1 hour.** Smaller window for stolen-token abuse. Override with `ACCESS_TOKEN_EXPIRE_MINUTES` if you need longer sessions, but consider implementing refresh tokens instead.
+
+**4. Login timing oracle closed.** The previous code only called `verify_password` when the email existed, so a wrong-email response came back noticeably faster than a wrong-password. Login now runs `verify_password` against a precomputed decoy hash on the missing-user path, equalizing the response time.
+
+**5. Lightweight migrations.** `database/db.py` gains `run_lightweight_migrations()`, called from the FastAPI lifespan after `create_tables()`. Detects the missing `users.token_version` column on existing SQLite databases and runs the `ALTER TABLE` once. Idempotent and safe to call on every startup. A bridge until Alembic lands (P1-7).
 
 ## Recent fixes — round 2 (2026-05-23)
 

@@ -118,6 +118,15 @@ def get_current_user(
     if not user.is_active:
         raise INACTIVE_EXCEPTION
 
+    # Verify the token's version matches the user's current token_version.
+    # /auth/logout increments token_version, so every outstanding JWT for that
+    # user becomes invalid immediately. Tokens issued before this field existed
+    # carry no `tv` claim — they are treated as version 0, matching the column
+    # default, so existing sessions survive deployment of this change.
+    token_tv: int = int(payload.get("tv", 0) or 0)
+    if token_tv != int(user.token_version or 0):
+        raise CREDENTIALS_EXCEPTION
+
     return user
 
 

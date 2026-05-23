@@ -23,6 +23,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
+from portal.limiter import limiter
 
 load_dotenv()
 
@@ -49,9 +53,11 @@ async def lifespan(app: FastAPI):
     print("  AI for Good — P33 Chicago")
     print("="*60)
 
-    # Create database tables
-    from database.db import create_tables
+    # Create database tables, then run idempotent schema patches for
+    # additive changes that create_all() won't apply to existing tables.
+    from database.db import create_tables, run_lightweight_migrations
     create_tables()
+    run_lightweight_migrations()
 
     # Seed first admin user if no users exist
     _seed_initial_admin()
@@ -79,6 +85,16 @@ app = FastAPI(
     version     = "1.0.0",
     lifespan    = lifespan,
 )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Rate limiting (slowapi)
+# Attach the limiter to app.state so decorated routes can find it via the
+# request, and register the standard 429 handler.
+# ─────────────────────────────────────────────────────────────────────────────
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

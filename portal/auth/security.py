@@ -59,9 +59,13 @@ if not SECRET_KEY or SECRET_KEY == _PLACEHOLDER_SECRET:
 # Algorithm used to sign JWT tokens
 ALGORITHM = "HS256"
 
-# How long access tokens are valid (in minutes)
+# How long access tokens are valid (in minutes).
+# Default 60 — short enough that a stolen token has limited blast radius even
+# before /auth/logout invalidates it via the token_version mechanism. Override
+# via ACCESS_TOKEN_EXPIRE_MINUTES in .env. Pair with a refresh-token endpoint
+# (not yet implemented) for long-lived UX.
 ACCESS_TOKEN_EXPIRE_MINUTES = int(
-    os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "480")  # 8 hours default
+    os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
 )
 
 # ─────────────────────────────────────────────────────────────────────────────

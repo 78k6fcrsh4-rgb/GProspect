@@ -70,6 +70,13 @@ class User(Base):
     is_active   = Column(Boolean, default=True, nullable=False)
     is_verified = Column(Boolean, default=False, nullable=False)
 
+    # ── Token versioning (logout / revoke-all) ────────────────────────────────
+    # Every JWT issued for this user encodes the current token_version as the
+    # `tv` claim. /auth/logout increments this column, which immediately
+    # invalidates every outstanding token for the user — closing the gap that
+    # stateless JWTs would otherwise leave open.
+    token_version = Column(Integer, default=0, nullable=False)
+
     # ── Timestamps ────────────────────────────────────────────────────────────
     created_at  = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at  = Column(DateTime(timezone=True), default=_utcnow,

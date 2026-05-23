@@ -20,7 +20,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
@@ -35,9 +35,19 @@ from portal.auth.dependencies import (
     get_current_user,
     get_current_admin,
 )
+from portal.limiter import limiter
 from portal.models.user import User, UserRole
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+# Pre-computed bcrypt hash for a random string nobody knows. Used as a decoy
+# target for verify_password() when login is called with an email that doesn't
+# exist, so wrong-email and wrong-password take the same wall-clock time.
+# Closes the timing oracle from the code review.
+_DUMMY_BCRYPT_HASH = (
+    "$2b$12$wOJxQyx1lG4rqWqcQwL.QeQX0Iu7XJrJ6NMpY6BqGJ.t8sxX6VqUq"
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -87,18 +97,25 @@ class ChangePasswordRequest(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/login", response_model=TokenResponse)
+@limiter.limit("5/minute")
 def login(
+    request:   Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db:        Session                   = Depends(get_db),
 ):
     """
     Login endpoint — validates credentials and returns JWT token.
 
-    Accepts email and password via OAuth2 password form.
-    Returns a JWT token on success that the client stores
-    and uses for all subsequent authenticated requests.
+    Accepts email and password via OAuth2 password form. Returns a JWT
+    token on success that the client stores and uses for all subsequent
+    authenticated requests.
+
+    Rate limit: 5 attempts per minute per source IP. Exceeding the limit
+    returns HTTP 429 — defense against credential-stuffing and password
+    spraying.
 
     Args:
+        request:   FastAPI request (used by slowapi for IP extraction).
         form_data: OAuth2 form with username (email) and password.
         db:        Database session.
 
@@ -108,14 +125,25 @@ def login(
     Raises:
         HTTPException 401: Invalid email or password.
         HTTPException 403: Account is deactivated.
+        HTTPException 429: Rate limit exceeded.
     """
     # Look up user by email
     user = db.query(User).filter(
         User.email == form_data.username.lower().strip()
     ).first()
 
-    # Verify user exists and password is correct
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    # Verify user exists and password is correct.
+    # NOTE: we run verify_password against a dummy hash even when the user
+    # doesn't exist, so wrong-email and wrong-password responses take the
+    # same time — closes the trivial timing oracle from the code review.
+    if not user:
+        verify_password(form_data.password, _DUMMY_BCRYPT_HASH)
+        raise HTTPException(
+            status_code = status.HTTP_401_UNAUTHORIZED,
+            detail      = "Incorrect email or password.",
+            headers     = {"WWW-Authenticate": "Bearer"},
+        )
+    if not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code = status.HTTP_401_UNAUTHORIZED,
             detail      = "Incorrect email or password.",
@@ -133,11 +161,13 @@ def login(
     user.last_login = datetime.now(timezone.utc)
     db.commit()
 
-    # Create JWT token
+    # Create JWT token. Includes the user's current token_version so /auth/logout
+    # can invalidate all outstanding tokens by incrementing token_version.
     token = create_access_token({
         "sub":      user.email,
         "role":     user.role.value,
         "org_name": user.org_name,
+        "tv":       user.token_version,
     })
 
     return TokenResponse(
@@ -250,19 +280,23 @@ def register_user(
 
 
 @router.post("/change-password")
+@limiter.limit("10/hour")
 def change_password(
-    request:      ChangePasswordRequest,
+    request:      Request,
+    payload:      ChangePasswordRequest,
     current_user: User    = Depends(get_current_user),
     db:           Session = Depends(get_db),
 ):
     """
     Changes the current user's password.
 
-    Requires the current password to be correct before
-    allowing the change.
+    Requires the current password to be correct before allowing the change.
+    Rate-limited to 10 attempts per hour per source IP — prevents using a
+    valid session to brute-force the existing password.
 
     Args:
-        request:      Current and new password.
+        request:      FastAPI request (slowapi key extraction).
+        payload:      Current and new password.
         current_user: Authenticated user (auto-injected).
         db:           Database session.
 
@@ -271,20 +305,21 @@ def change_password(
 
     Raises:
         HTTPException 400: Current password is incorrect.
+        HTTPException 429: Rate limit exceeded.
     """
-    if not verify_password(request.current_password, current_user.hashed_password):
+    if not verify_password(payload.current_password, current_user.hashed_password):
         raise HTTPException(
             status_code = status.HTTP_400_BAD_REQUEST,
             detail      = "Current password is incorrect.",
         )
 
-    if len(request.new_password) < 8:
+    if len(payload.new_password) < 8:
         raise HTTPException(
             status_code = status.HTTP_400_BAD_REQUEST,
             detail      = "New password must be at least 8 characters.",
         )
 
-    current_user.hashed_password = hash_password(request.new_password)
+    current_user.hashed_password = hash_password(payload.new_password)
     current_user.updated_at      = datetime.now(timezone.utc)
     db.commit()
 
@@ -292,21 +327,35 @@ def change_password(
 
 
 @router.post("/logout")
-def logout(current_user: User = Depends(get_current_user)):
+def logout(
+    current_user: User    = Depends(get_current_user),
+    db:           Session = Depends(get_db),
+):
     """
-    Logout endpoint.
+    Logout endpoint — actually invalidates outstanding tokens.
 
-    JWT tokens are stateless — the server cannot invalidate them.
-    The client is responsible for deleting the stored token.
-    This endpoint confirms the logout and the client clears
-    its stored token.
+    Increments the user's `token_version` column, which is encoded as the
+    `tv` claim in every issued JWT. Because get_current_user re-checks the
+    claim against the column on every request, every outstanding token for
+    this user becomes invalid as soon as this commit lands.
+
+    Note: this invalidates ALL of the user's sessions, not just the current
+    browser tab. A future "logout this device only" feature would require
+    per-token jti tracking — not yet implemented.
 
     Args:
         current_user: Authenticated user (auto-injected).
+        db:           Database session.
 
     Returns:
-        Success message.
+        Confirmation message.
     """
+    current_user.token_version = (current_user.token_version or 0) + 1
+    current_user.updated_at    = datetime.now(timezone.utc)
+    db.commit()
     return {
-        "message": f"Successfully logged out. Goodbye {current_user.full_name}."
+        "message": (
+            f"Successfully logged out. All sessions invalidated. "
+            f"Goodbye {current_user.full_name}."
+        ),
     }

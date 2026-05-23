@@ -16,6 +16,7 @@ pydantic[email]>=2.7.0           # EmailStr
 # Auth
 python-jose[cryptography]>=3.3.0 # JWT
 passlib[bcrypt]>=1.7.4           # password hashing
+slowapi>=0.1.9                   # rate limiting (login brute-force defense)
 
 # Agent / data sources
 anthropic>=0.34.0                # AI scoring + web search
