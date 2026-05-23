@@ -17,7 +17,7 @@ compatible with FastAPI's built-in security documentation.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -130,7 +130,7 @@ def login(
         )
 
     # Update last login timestamp
-    user.last_login = datetime.utcnow()
+    user.last_login = datetime.now(timezone.utc)
     db.commit()
 
     # Create JWT token
@@ -285,7 +285,7 @@ def change_password(
         )
 
     current_user.hashed_password = hash_password(request.new_password)
-    current_user.updated_at      = datetime.utcnow()
+    current_user.updated_at      = datetime.now(timezone.utc)
     db.commit()
 
     return {"message": "Password changed successfully."}

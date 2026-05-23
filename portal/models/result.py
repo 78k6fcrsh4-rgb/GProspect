@@ -5,7 +5,13 @@ GrantResult database model — placeholder until full implementation.
 """
 from database.db import Base
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text
-from datetime import datetime
+from datetime import datetime, timezone
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now — drop-in for the deprecated datetime.utcnow()."""
+    return datetime.now(timezone.utc)
+
 
 class GrantResult(Base):
     __tablename__ = "grant_results"
@@ -17,5 +23,5 @@ class GrantResult(Base):
     deadline      = Column(String, nullable=True)
     award_range   = Column(String, nullable=True)
     next_action   = Column(Text, nullable=True)
-    run_date      = Column(DateTime, default=datetime.utcnow)
+    run_date      = Column(DateTime(timezone=True), default=_utcnow)
     raw_data      = Column(Text, nullable=True)

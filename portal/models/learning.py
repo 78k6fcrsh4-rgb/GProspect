@@ -5,7 +5,13 @@ LearningEntry database model — placeholder until full implementation.
 """
 from database.db import Base
 from sqlalchemy import Column, Integer, String, DateTime, Text
-from datetime import datetime
+from datetime import datetime, timezone
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now — drop-in for the deprecated datetime.utcnow()."""
+    return datetime.now(timezone.utc)
+
 
 class LearningEntry(Base):
     __tablename__ = "learning_entries"
@@ -14,4 +20,4 @@ class LearningEntry(Base):
     entry_type    = Column(String, nullable=False)
     description   = Column(Text, nullable=True)
     triggered_by  = Column(String, nullable=True)
-    created_at    = Column(DateTime, default=datetime.utcnow)
+    created_at    = Column(DateTime(timezone=True), default=_utcnow)

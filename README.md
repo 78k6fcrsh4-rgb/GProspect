@@ -70,6 +70,8 @@ Copy `.env.example` (in the parent `AI4GSH/` folder) to `lsrmba777/.env` and fil
 | `ADMIN_ORG` | No | First-run admin organization name |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | No | JWT lifetime (default 480 = 8 hours) |
 | `DATABASE_URL` | No | Postgres URL. Empty = local SQLite at `./grant_prospector.db` |
+| `CORS_ALLOWED_ORIGINS` | For browser frontends | Comma-separated origin whitelist, e.g. `https://portal.example.org,https://app.example.org`. Enables `allow_credentials`. |
+| `CORS_ALLOW_ALL` | Local dev only | Set to `1` to allow `*` (forces `allow_credentials=False`). Logs a warning at startup. |
 
 ## Project structure
 
@@ -96,9 +98,21 @@ outputs/      Where run_agent.py writes its result files and the
 
 - `SECRET_KEY` controls JWT signing. If unset (or left at the placeholder string), the portal will generate an **ephemeral** random key at startup and warn loudly. JWTs will be invalidated on every restart and the deployment is not safe. Always set `SECRET_KEY` to a long random string before exposing the portal anywhere.
 - The seeded admin password (`ChangeMe123!`) is intentionally embarrassing. Change it on first login.
-- CORS is currently `allow_origins=["*"]` in `portal/main.py`. Restrict before going to production.
+- CORS is now environment-driven. With neither `CORS_ALLOWED_ORIGINS` nor `CORS_ALLOW_ALL` set, no cross-origin requests are accepted; same-origin still works. The dev escape hatch `CORS_ALLOW_ALL=1` forces `allow_credentials=False` so the `*`-with-credentials misconfiguration is impossible.
 
-## Recent fixes (2026-05-23)
+## Recent fixes — round 2 (2026-05-23)
+
+A second pass tackling the highest-priority items from a portal code review (the full review lives at `~/WorkBench/AI4GSH/portal_code_review.md`).
+
+**1. CORS is now env-driven.** `portal/main.py` previously hardcoded `allow_origins=["*"]` with `allow_credentials=True` — a combination modern browsers actively reject, and a footgun if credentials were later moved to cookies. Origins now come from `CORS_ALLOWED_ORIGINS` (comma-separated whitelist) or `CORS_ALLOW_ALL=1` (dev only; forces credentials off). Default is "deny all cross-origin."
+
+**2. `datetime.utcnow()` removed.** Deprecated in Python 3.12 and tz-naive — guaranteed to cause subtle timezone bugs at display boundaries. Replaced with `datetime.now(timezone.utc)` across `portal/auth/security.py`, `portal/routers/auth.py`, and all three placeholder models (`user.py`, `result.py`, `learning.py`). Model columns now declare `DateTime(timezone=True)` and default via a small `_utcnow()` helper.
+
+**3. `_load_profile` deduplicated.** Three near-identical copies lived in the admin, results, and feedback routers, and had already started drifting. They are now a single `OrgProfile.find_for_org(org_name)` classmethod in `agent/profile.py`. The lazy `from agent.profile import OrgProfile` calls inside route bodies were cleaned up at the same time.
+
+**4. `/results/run` is now a background task.** Previously ran the full pipeline (web search → scoring → exports) inside the HTTP request thread, which would time out under any real load. It now returns `202 Accepted` immediately and dispatches the work via FastAPI's `BackgroundTasks`. Poll `GET /results/runs` for completion — `AgentState` remains the source of truth for run history. Exceptions in the worker are logged with `logging.exception(...)` rather than swallowed. Background tasks are still in-process; switch to RQ/arq/Celery before any multi-worker deployment so runs survive restarts.
+
+## Recent fixes — round 1 (2026-05-23)
 
 This commit cleans up several issues discovered during a local-run audit. None of them changed behavior of the running code; they just made the project install correctly, fail safely on misconfiguration, and stop checking in transient files.
 

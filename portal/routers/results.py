@@ -18,11 +18,12 @@ Results are filtered to the current user's organization only.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -32,6 +33,8 @@ from portal.auth.dependencies import get_current_user, get_current_admin
 from portal.models.user import User
 from agent.profile import OrgProfile
 from agent.state import AgentState
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/results", tags=["Results"])
 
@@ -245,7 +248,7 @@ def get_run_history(
         List of RunSummaryResponse objects.
     """
     try:
-        profile = _load_profile(current_user.org_name)
+        profile = OrgProfile.find_for_org(current_user.org_name)
         if not profile:
             return []
 
@@ -266,77 +269,112 @@ def get_run_history(
         return []
 
 
-@router.post("/run")
+@router.post("/run", status_code=status.HTTP_202_ACCEPTED)
 def trigger_run(
-    request:       TriggerRunRequest,
-    current_admin: User    = Depends(get_current_admin),
-    db:            Session = Depends(get_db),
+    request:        TriggerRunRequest,
+    background:     BackgroundTasks,
+    current_admin:  User    = Depends(get_current_admin),
+    db:             Session = Depends(get_db),
 ):
     """
     Triggers a new grant prospecting run (Admin only).
 
-    Runs the full agent pipeline and saves results to the
-    outputs folder. The run happens synchronously — the
-    response returns when the run is complete.
-
-    For production this should be moved to a background task.
+    The run is dispatched as a background task and the endpoint returns
+    immediately with HTTP 202 Accepted. A real run touches the network,
+    invokes LLM scoring, and writes exports — easily multiple minutes —
+    so running it inside the request thread would exceed any reasonable
+    HTTP timeout. Poll GET /results/runs to see when it completes; the
+    AgentState run history is the canonical record.
 
     Args:
-        request:       Run parameters.
-        current_admin: Must be Admin (auto-injected).
-        db:            Database session.
+        request:        Run parameters.
+        background:     FastAPI BackgroundTasks (auto-injected).
+        current_admin:  Must be Admin (auto-injected).
+        db:             Database session.
 
     Returns:
-        Run summary with result count and output path.
+        202 Accepted with a confirmation message. NOT the run result.
+    """
+    profile = OrgProfile.find_for_org(current_admin.org_name)
+    if not profile:
+        raise HTTPException(
+            status_code = status.HTTP_404_NOT_FOUND,
+            detail      = f"No profile found for organization: {current_admin.org_name}",
+        )
+
+    custom_queries = [request.custom_search] if request.custom_search else None
+
+    background.add_task(
+        _execute_run_in_background,
+        profile        = profile,
+        max_queries    = request.max_queries,
+        custom_queries = custom_queries,
+        triggered_by   = current_admin.email,
+    )
+
+    log.info(
+        "Run queued for %s by %s (max_queries=%d)",
+        profile.org_name, current_admin.email, request.max_queries,
+    )
+
+    return {
+        "status":  "accepted",
+        "message": (
+            "Run queued. The agent is working in the background — this "
+            "typically takes a few minutes. Poll GET /results/runs for "
+            "completion and GET /results for the latest opportunities."
+        ),
+    }
+
+
+def _execute_run_in_background(
+    profile,
+    max_queries:    int,
+    custom_queries: Optional[list[str]],
+    triggered_by:   str,
+) -> None:
+    """
+    Background worker for /results/run.
+
+    Runs synchronously inside FastAPI's BackgroundTasks executor, which is
+    fine for a single-worker dev portal. For multi-worker / multi-host
+    production, swap this for a real job queue (RQ / arq / Celery) so runs
+    survive worker restarts and can be retried.
+
+    Exceptions are caught and logged — never re-raised — because there is
+    no caller to receive them and an unhandled exception in a background
+    task can crash the worker.
     """
     try:
-        profile = _load_profile(current_admin.org_name)
-        if not profile:
-            raise HTTPException(
-                status_code = status.HTTP_404_NOT_FOUND,
-                detail      = f"No profile found for organization: {current_admin.org_name}",
-            )
-
         from agent.loop import AgentLoop
         from output.formatter import ResultFormatter
         from output.exporter import ResultExporter
+
+        log.info("Background run starting for %s (by %s)", profile.org_name, triggered_by)
 
         loop      = AgentLoop(profile)
         formatter = ResultFormatter(profile)
         exporter  = ResultExporter(profile)
 
-        custom_queries = [request.custom_search] if request.custom_search else None
-
-        results   = loop.run(
-            max_queries    = request.max_queries,
+        results = loop.run(
+            max_queries    = max_queries,
             custom_queries = custom_queries,
         )
 
         if not results:
-            return {
-                "success":      True,
-                "results_found": 0,
-                "message":      "Run complete. No new opportunities found.",
-                "csv_path":     None,
-            }
+            log.info("Background run complete for %s — no new opportunities", profile.org_name)
+            return
 
         formatted = formatter.format_all(results)
-        csv_path  = exporter.export_csv(formatted)
+        exporter.export_csv(formatted)
         exporter.export_excel(formatted)
         exporter.export_run_summary(formatted)
-
-        return {
-            "success":       True,
-            "results_found": len(results),
-            "message":       f"Run complete. {len(results)} opportunities found.",
-            "csv_path":      csv_path,
-        }
-
-    except Exception as e:
-        raise HTTPException(
-            status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail      = f"Run failed: {str(e)}",
+        log.info(
+            "Background run complete for %s — %d opportunities exported",
+            profile.org_name, len(results),
         )
+    except Exception:
+        log.exception("Background run failed for %s (triggered by %s)", profile.org_name, triggered_by)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -403,35 +441,6 @@ def _find_latest_export(org_name: str, extension: str) -> Optional[str]:
     files   = sorted(base_dir.rglob(pattern), reverse=True)
 
     return str(files[0]) if files else None
-
-
-def _load_profile(org_name: str) -> Optional[OrgProfile]:
-    """
-    Loads the org profile for the given organization name.
-
-    Searches the profiles directory for a matching profile.
-
-    Args:
-        org_name: Organization name to find profile for.
-
-    Returns:
-        OrgProfile or None if not found.
-    """
-    profiles_dir = Path("profiles")
-    if not profiles_dir.exists():
-        return None
-
-    for profile_file in profiles_dir.glob("*.json"):
-        if profile_file.name == "org_profile_template.json":
-            continue
-        try:
-            profile = OrgProfile.from_json(profile_file)
-            if profile.org_name.lower() == org_name.lower():
-                return profile
-        except Exception:
-            continue
-
-    return None
 
 
 def _dict_to_result_response(

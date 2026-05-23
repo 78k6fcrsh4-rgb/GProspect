@@ -14,7 +14,7 @@ organizations cannot see each other's data.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean, Column, DateTime, Integer, String, Enum
@@ -22,6 +22,11 @@ from sqlalchemy import (
 import enum
 
 from database.db import Base
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now — drop-in for the deprecated datetime.utcnow()."""
+    return datetime.now(timezone.utc)
 
 
 class UserRole(str, enum.Enum):
@@ -66,10 +71,10 @@ class User(Base):
     is_verified = Column(Boolean, default=False, nullable=False)
 
     # ── Timestamps ────────────────────────────────────────────────────────────
-    created_at  = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at  = Column(DateTime, default=datetime.utcnow,
-                        onupdate=datetime.utcnow, nullable=False)
-    last_login  = Column(DateTime, nullable=True)
+    created_at  = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at  = Column(DateTime(timezone=True), default=_utcnow,
+                        onupdate=_utcnow, nullable=False)
+    last_login  = Column(DateTime(timezone=True), nullable=True)
 
     # ── Password reset ────────────────────────────────────────────────────────
     reset_token            = Column(String, nullable=True)

@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 import secrets
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -156,9 +156,9 @@ def create_access_token(
     to_encode = data.copy()
 
     if expires_in:
-        expire = datetime.utcnow() + expires_in
+        expire = datetime.now(timezone.utc) + expires_in
     else:
-        expire = datetime.utcnow() + timedelta(
+        expire = datetime.now(timezone.utc) + timedelta(
             minutes=ACCESS_TOKEN_EXPIRE_MINUTES
         )
 
