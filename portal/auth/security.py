@@ -20,6 +20,8 @@ Security standards:
 from __future__ import annotations
 
 import os
+import secrets
+import sys
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -34,12 +36,25 @@ load_dotenv()
 # All security settings loaded from environment variables.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Secret key for signing JWT tokens
-# Must be set in .env file — never use the default in production
-SECRET_KEY = os.getenv(
-    "SECRET_KEY",
-    "change-this-in-production-use-a-long-random-string"
-)
+# Secret key for signing JWT tokens.
+# MUST be set in .env (or any secrets manager) for any non-local deployment.
+# If unset, or left at the well-known placeholder string, we generate an
+# ephemeral random key at process start so local development still works —
+# but every restart invalidates all existing JWTs and we print a loud
+# warning so this never silently ships to production.
+_PLACEHOLDER_SECRET = "change-this-in-production-use-a-long-random-string"
+SECRET_KEY = os.getenv("SECRET_KEY")
+
+if not SECRET_KEY or SECRET_KEY == _PLACEHOLDER_SECRET:
+    SECRET_KEY = secrets.token_urlsafe(64)
+    print(
+        "\n[security] WARNING: SECRET_KEY is not set (or is the known placeholder).\n"
+        "[security]          Generated a one-shot ephemeral key for this process.\n"
+        "[security]          All issued JWTs will be invalidated on restart.\n"
+        "[security]          Set SECRET_KEY in your .env before any deployment.\n"
+        "[security]          Generate with:  python -c \"import secrets; print(secrets.token_urlsafe(64))\"\n",
+        file=sys.stderr,
+    )
 
 # Algorithm used to sign JWT tokens
 ALGORITHM = "HS256"
