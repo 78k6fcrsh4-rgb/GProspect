@@ -14,13 +14,13 @@ Only Admin can view submission history and learning log.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from agent.profile import OrgProfile
 from database.db import get_db
 from portal.auth.dependencies import get_current_user, get_current_admin
 from portal.models.user import User
@@ -90,10 +90,9 @@ def submit_missed_grant(
         HTTPException 500: Processing error.
     """
     try:
-        from agent.profile import OrgProfile
         from learning.feedback import FeedbackProcessor
 
-        profile = _load_profile(current_user.org_name)
+        profile = OrgProfile.find_for_org(current_user.org_name)
         if not profile:
             raise HTTPException(
                 status_code = status.HTTP_404_NOT_FOUND,
@@ -151,10 +150,9 @@ def get_submissions(
         List of submission records.
     """
     try:
-        from agent.profile import OrgProfile
         from learning.feedback import FeedbackProcessor
 
-        profile = _load_profile(current_admin.org_name)
+        profile = OrgProfile.find_for_org(current_admin.org_name)
         if not profile:
             return []
 
@@ -183,10 +181,9 @@ def get_submission(
         Submission record or 404 if not found.
     """
     try:
-        from agent.profile import OrgProfile
         from learning.feedback import FeedbackProcessor
 
-        profile = _load_profile(current_admin.org_name)
+        profile = OrgProfile.find_for_org(current_admin.org_name)
         if not profile:
             raise HTTPException(
                 status_code = status.HTTP_404_NOT_FOUND,
@@ -230,10 +227,9 @@ def get_feedback_stats(
         Learning loop statistics dictionary.
     """
     try:
-        from agent.profile import OrgProfile
         from learning.learning_log import LearningLog
 
-        profile = _load_profile(current_admin.org_name)
+        profile = OrgProfile.find_for_org(current_admin.org_name)
         if not profile:
             return {}
 
@@ -254,26 +250,3 @@ def get_feedback_stats(
         return {}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Private helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _load_profile(org_name: str):
-    """Loads the org profile for the given organization name."""
-    from agent.profile import OrgProfile
-
-    profiles_dir = Path("profiles")
-    if not profiles_dir.exists():
-        return None
-
-    for profile_file in profiles_dir.glob("*.json"):
-        if profile_file.name == "org_profile_template.json":
-            continue
-        try:
-            profile = OrgProfile.from_json(profile_file)
-            if profile.org_name.lower() == org_name.lower():
-                return profile
-        except Exception:
-            continue
-
-    return None

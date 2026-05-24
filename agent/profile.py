@@ -262,6 +262,46 @@ class OrgProfile(BaseModel):
             data = json.load(f)
         return cls.model_validate(data)
 
+    @classmethod
+    def find_for_org(
+        cls,
+        org_name:     str,
+        profiles_dir: str | Path = "profiles",
+    ) -> Optional[OrgProfile]:
+        """
+        Locate and load the profile JSON for the given organization.
+
+        Scans `profiles_dir` for any *.json (skipping the template), loads each
+        one defensively, and returns the first profile whose org_name matches
+        case-insensitively. Returns None if the directory is missing or no
+        matching profile is found. Designed as the single source of truth for
+        the router layer — replaces the previously duplicated `_load_profile`
+        helpers in admin/results/feedback routers.
+
+        Args:
+            org_name:     The organization name to match (case-insensitive).
+            profiles_dir: Directory containing profile JSON files.
+
+        Returns:
+            The matching OrgProfile, or None if not found.
+        """
+        profiles_path = Path(profiles_dir)
+        if not profiles_path.exists():
+            return None
+
+        for profile_file in profiles_path.glob("*.json"):
+            if profile_file.name == "org_profile_template.json":
+                continue
+            try:
+                profile = cls.from_json(profile_file)
+            except Exception:
+                # Malformed or partial profile — skip silently and keep scanning.
+                continue
+            if profile.org_name.lower() == org_name.lower():
+                return profile
+
+        return None
+
     def to_json(self, path: str | Path, indent: int = 2) -> None:
         """Save this OrgProfile to a JSON file."""
         path = Path(path)

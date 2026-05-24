@@ -20,7 +20,9 @@ Security standards:
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+import secrets
+import sys
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -34,19 +36,36 @@ load_dotenv()
 # All security settings loaded from environment variables.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Secret key for signing JWT tokens
-# Must be set in .env file — never use the default in production
-SECRET_KEY = os.getenv(
-    "SECRET_KEY",
-    "change-this-in-production-use-a-long-random-string"
-)
+# Secret key for signing JWT tokens.
+# MUST be set in .env (or any secrets manager) for any non-local deployment.
+# If unset, or left at the well-known placeholder string, we generate an
+# ephemeral random key at process start so local development still works —
+# but every restart invalidates all existing JWTs and we print a loud
+# warning so this never silently ships to production.
+_PLACEHOLDER_SECRET = "change-this-in-production-use-a-long-random-string"
+SECRET_KEY = os.getenv("SECRET_KEY")
+
+if not SECRET_KEY or SECRET_KEY == _PLACEHOLDER_SECRET:
+    SECRET_KEY = secrets.token_urlsafe(64)
+    print(
+        "\n[security] WARNING: SECRET_KEY is not set (or is the known placeholder).\n"
+        "[security]          Generated a one-shot ephemeral key for this process.\n"
+        "[security]          All issued JWTs will be invalidated on restart.\n"
+        "[security]          Set SECRET_KEY in your .env before any deployment.\n"
+        "[security]          Generate with:  python -c \"import secrets; print(secrets.token_urlsafe(64))\"\n",
+        file=sys.stderr,
+    )
 
 # Algorithm used to sign JWT tokens
 ALGORITHM = "HS256"
 
-# How long access tokens are valid (in minutes)
+# How long access tokens are valid (in minutes).
+# Default 60 — short enough that a stolen token has limited blast radius even
+# before /auth/logout invalidates it via the token_version mechanism. Override
+# via ACCESS_TOKEN_EXPIRE_MINUTES in .env. Pair with a refresh-token endpoint
+# (not yet implemented) for long-lived UX.
 ACCESS_TOKEN_EXPIRE_MINUTES = int(
-    os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "480")  # 8 hours default
+    os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -141,9 +160,9 @@ def create_access_token(
     to_encode = data.copy()
 
     if expires_in:
-        expire = datetime.utcnow() + expires_in
+        expire = datetime.now(timezone.utc) + expires_in
     else:
-        expire = datetime.utcnow() + timedelta(
+        expire = datetime.now(timezone.utc) + timedelta(
             minutes=ACCESS_TOKEN_EXPIRE_MINUTES
         )
 

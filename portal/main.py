@@ -23,6 +23,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
+from portal.limiter import limiter
 
 load_dotenv()
 
@@ -49,9 +53,11 @@ async def lifespan(app: FastAPI):
     print("  AI for Good — P33 Chicago")
     print("="*60)
 
-    # Create database tables
-    from database.db import create_tables
+    # Create database tables, then run idempotent schema patches for
+    # additive changes that create_all() won't apply to existing tables.
+    from database.db import create_tables, run_lightweight_migrations
     create_tables()
+    run_lightweight_migrations()
 
     # Seed first admin user if no users exist
     _seed_initial_admin()
@@ -82,15 +88,52 @@ app = FastAPI(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CORS middleware
-# Allows the browser to make requests to this API.
-# In production restrict origins to your actual domain.
+# Rate limiting (slowapi)
+# Attach the limiter to app.state so decorated routes can find it via the
+# request, and register the standard 429 handler.
 # ─────────────────────────────────────────────────────────────────────────────
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CORS middleware
+# Origins come from the environment. Two knobs:
+#
+#   CORS_ALLOWED_ORIGINS   Comma-separated whitelist, e.g.
+#                          "https://portal.example.org,https://app.example.org"
+#                          Sets allow_credentials=True (cookies, Auth header).
+#
+#   CORS_ALLOW_ALL=1       Local-dev escape hatch. Sets origins=["*"] AND forces
+#                          allow_credentials=False — the wildcard-with-credentials
+#                          combo is rejected by every modern browser and is the
+#                          most common CORS misconfiguration in the wild.
+#
+# Unset both → no cross-origin requests are accepted. Same-origin still works.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_cors_env       = os.getenv("CORS_ALLOWED_ORIGINS", "").strip()
+_cors_allow_all = os.getenv("CORS_ALLOW_ALL", "").strip().lower() in {"1", "true", "yes"}
+
+if _cors_allow_all:
+    _cors_origins     = ["*"]
+    _cors_credentials = False
+    print(
+        "[security] WARNING: CORS_ALLOW_ALL is enabled — origins='*', credentials disabled. "
+        "Use only for local development.",
+    )
+elif _cors_env:
+    _cors_origins     = [o.strip() for o in _cors_env.split(",") if o.strip()]
+    _cors_credentials = True
+else:
+    _cors_origins     = []
+    _cors_credentials = False
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins     = ["*"],  # Restrict in production
-    allow_credentials = True,
+    allow_origins     = _cors_origins,
+    allow_credentials = _cors_credentials,
     allow_methods     = ["*"],
     allow_headers     = ["*"],
 )

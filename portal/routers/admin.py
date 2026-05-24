@@ -20,13 +20,13 @@ Endpoints:
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from agent.profile import OrgProfile
 from database.db import get_db
 from portal.auth.dependencies import get_current_admin
 from portal.models.user import User, UserRole
@@ -193,10 +193,9 @@ def get_watch_list(
     Returns:
         List of watch list source dictionaries.
     """
-    from agent.profile import OrgProfile
     from agent.state import AgentState
 
-    profile = _load_profile(current_admin.org_name)
+    profile = OrgProfile.find_for_org(current_admin.org_name)
     if not profile:
         return []
 
@@ -223,10 +222,9 @@ def add_watch_list_source(
     Returns:
         Success or already-exists message.
     """
-    from agent.profile import OrgProfile
     from agent.state import AgentState
 
-    profile = _load_profile(current_admin.org_name)
+    profile = OrgProfile.find_for_org(current_admin.org_name)
     if not profile:
         raise HTTPException(
             status_code = status.HTTP_404_NOT_FOUND,
@@ -268,10 +266,9 @@ def remove_watch_list_source(
     Returns:
         Success or not-found message.
     """
-    from agent.profile import OrgProfile
     from agent.state import AgentState
 
-    profile = _load_profile(current_admin.org_name)
+    profile = OrgProfile.find_for_org(current_admin.org_name)
     if not profile:
         raise HTTPException(
             status_code = status.HTTP_404_NOT_FOUND,
@@ -308,10 +305,9 @@ def get_learning_log(
     Returns:
         Dictionary with log stats and recent entries.
     """
-    from agent.profile import OrgProfile
     from learning.learning_log import LearningLog
 
-    profile = _load_profile(current_admin.org_name)
+    profile = OrgProfile.find_for_org(current_admin.org_name)
     if not profile:
         return {"entries": [], "stats": {}}
 
@@ -345,10 +341,9 @@ def get_agent_state(
     Returns:
         Agent state statistics dictionary.
     """
-    from agent.profile import OrgProfile
     from agent.state import AgentState
 
-    profile = _load_profile(current_admin.org_name)
+    profile = OrgProfile.find_for_org(current_admin.org_name)
     if not profile:
         return {}
 
@@ -374,9 +369,7 @@ def get_settings(
     Returns:
         Current agent settings dictionary.
     """
-    from agent.profile import OrgProfile
-
-    profile = _load_profile(current_admin.org_name)
+    profile = OrgProfile.find_for_org(current_admin.org_name)
     if not profile:
         raise HTTPException(
             status_code = status.HTTP_404_NOT_FOUND,
@@ -397,26 +390,3 @@ def get_settings(
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Private helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _load_profile(org_name: str):
-    """Loads the org profile for the given organization name."""
-    from agent.profile import OrgProfile
-
-    profiles_dir = Path("profiles")
-    if not profiles_dir.exists():
-        return None
-
-    for profile_file in profiles_dir.glob("*.json"):
-        if profile_file.name == "org_profile_template.json":
-            continue
-        try:
-            profile = OrgProfile.from_json(profile_file)
-            if profile.org_name.lower() == org_name.lower():
-                return profile
-        except Exception:
-            continue
-
-    return None

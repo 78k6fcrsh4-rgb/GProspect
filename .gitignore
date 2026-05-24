@@ -1,15 +1,31 @@
 .env
+.env.local
+
+# Python
 venv/
+.venv/
 __pycache__/
 *.pyc
 *.pyo
 .Python
+
+# SQLite — main file and the WAL / SHM / journal sidecars
 *.db
-*.sqlite
-*.sqlite3
-.vscode/
-.DS_Store
-*.log
 *.db-shm
 *.db-wal
-grant_prospector.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Editors
+.vscode/
+.idea/
+*~
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Logs
+*.log

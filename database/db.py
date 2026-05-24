@@ -134,6 +134,42 @@ def create_tables() -> None:
     print(f"[Database] Tables created — {DATABASE_URL}")
 
 
+def run_lightweight_migrations() -> None:
+    """
+    Idempotent schema patches for known additive changes.
+
+    Bridges the gap until Alembic is introduced. `Base.metadata.create_all`
+    only creates *missing* tables — it does NOT add new columns to existing
+    tables. When we ship a new column on a model, an existing local database
+    needs an ALTER TABLE to pick it up. This helper performs those ALTERs
+    only when the column is genuinely missing, so it's safe to call on every
+    startup and a no-op on fresh databases (where create_all already built
+    the columns).
+
+    Replace this with proper migrations (Alembic) before any non-trivial
+    schema change. Adds here should be paired with a matching column on the
+    model so create_all handles fresh DBs.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+
+    existing_cols = {c["name"] for c in inspector.get_columns("users")}
+
+    # users.token_version — added for token revocation on /auth/logout.
+    if "token_version" not in existing_cols:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE users "
+                    "ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0"
+                )
+            )
+        print("[Database] Migration: added users.token_version")
+
+
 def get_db_stats() -> dict:
     """
     Returns basic database statistics.
