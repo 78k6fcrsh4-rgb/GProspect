@@ -6,9 +6,10 @@ Free, automated grant prospecting for US nonprofits. Ingests open grant sources,
 
 You give it a JSON profile of your nonprofit — mission, programs, geography, populations served, grant size range, funder exclusions — and it produces a ranked list of currently open grant opportunities, with hot / warm / cold deadline classification and AI-generated match explanations. Results are persisted to SQLite (or Postgres) and exposed through a web portal that supports login, results browsing, admin operations, and a feedback-driven learning loop that improves matching over time.
 
-Two entry points share the same agent core:
+Three entry points share the same agent core:
 - **CLI**: `run_agent.py` runs the full pipeline once and exports CSV / Excel.
-- **Web portal**: `portal/main.py` (FastAPI) serves the same results plus auth, admin, and the learning loop.
+- **Web portal (API)**: `portal/main.py` (FastAPI) serves the same results plus auth, admin, and the learning loop.
+- **Web portal (UI)**: `frontend/streamlit_app.py` (Streamlit MVP) — login + ranked results dashboard, talks to the FastAPI backend over HTTP.
 
 ## Quick start (local)
 
@@ -34,6 +35,18 @@ uvicorn portal.main:app --reload --port 8000
 Then open `http://localhost:8000/docs` for the interactive API, or `http://localhost:8000` for the portal root.
 
 The first admin user is seeded on startup from `ADMIN_EMAIL` / `ADMIN_PASSWORD` in your `.env`. Default if unset: `admin@deborahsplace.org` / `ChangeMe123!` — rotate it immediately.
+
+### Frontend (Streamlit MVP)
+
+The dashboard runs as a separate process on port 8501. In a second terminal:
+
+```bash
+bash ~/WorkBench/AI4GSH/run_frontend.sh
+```
+
+That reuses the backend's `.venv`, installs `streamlit` + `pandas` the first time, and starts the dashboard at `http://localhost:8501`. Sign in with the admin credentials from your `.env`. The frontend talks to the backend over HTTP — set `PORTAL_API_URL` if the backend is somewhere other than `http://localhost:8000`.
+
+Scope of the MVP: login, dashboard KPIs, ranked-results table with score filtering, and CSV export. Feedback submission, admin user management, and run triggering still go through the API directly (`/docs` is the easiest entry point) until those screens are added.
 
 ## CLI usage
 
@@ -78,7 +91,8 @@ Copy `.env.example` (in the parent `AI4GSH/` folder) to `lsrmba777/.env` and fil
 
 ```
 agent/        Core agent loop, profile parsing, scheduler, prompt builder
-portal/       FastAPI web app — main.py, auth/, models/, routers/
+portal/       FastAPI web app — main.py, auth/, models/, routers/, limiter
+frontend/     Streamlit MVP dashboard (login + ranked results)
 database/     SQLAlchemy engine + session factory + table creation
 tools/        Data source integrations: web_search, grants.gov, IRS 990
 scoring/      Anthropic-backed match scorer
