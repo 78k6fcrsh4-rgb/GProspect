@@ -59,6 +59,14 @@ async def lifespan(app: FastAPI):
     create_tables()
     run_lightweight_migrations()
 
+    # Seed tenant orgs (Deborah's Place, Found Village) — must run before
+    # _seed_initial_admin so the admin row can be attached to an org_id.
+    # Also re-runs the lightweight migration's backfill step in case the
+    # orgs table didn't yet exist when migrations first executed (fresh DBs
+    # take this path).
+    _seed_initial_orgs()
+    run_lightweight_migrations()
+
     # Seed first admin user if no users exist
     _seed_initial_admin()
 
@@ -148,11 +156,13 @@ from portal.routers.auth     import router as auth_router
 from portal.routers.results  import router as results_router
 from portal.routers.admin    import router as admin_router
 from portal.routers.feedback import router as feedback_router
+from portal.routers.orgs     import router as orgs_router
 
 app.include_router(auth_router)
 app.include_router(results_router)
 app.include_router(admin_router)
 app.include_router(feedback_router)
+app.include_router(orgs_router)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -197,6 +207,99 @@ def health_check():
 # Startup helper
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _seed_initial_orgs() -> None:
+    """
+    Idempotently seeds the two pilot organizations: Deborah's Place (Chicago,
+    women's housing) and Found Village (Cincinnati, youth welfare).
+
+    Also imports the existing profiles/deborah_place.json into the v2
+    org_profile_versions table as version 1 if no current profile exists
+    for Deborah's Place yet. Found Village starts without a profile version
+    — Phase 1 intake creates the first version.
+
+    Safe to call on every startup. No-op if both orgs already exist and
+    Deborah's Place already has a current profile version.
+    """
+    import json
+    from pathlib import Path
+
+    from database.db import SessionLocal
+    from portal.models.organization import Organization, OrgStatus
+    from portal.models.org_profile  import OrgProfileVersion, create_next_version
+
+    PILOTS = [
+        # slug, display_name
+        ("deborahs-place", "Deborah's Place"),
+        ("found-village",  "Found Village"),
+    ]
+
+    # Profile-import map: which pilots have a JSON profile to seed as v1.
+    PROFILE_IMPORTS = {
+        "deborahs-place": Path("profiles") / "deborah_place.json",
+    }
+
+    db = SessionLocal()
+    try:
+        # Step 1 — ensure both orgs exist.
+        for slug, display_name in PILOTS:
+            existing = db.query(Organization).filter_by(slug=slug).one_or_none()
+            if existing is None:
+                org = Organization(
+                    slug         = slug,
+                    display_name = display_name,
+                    status       = OrgStatus.ACTIVE,
+                    settings     = {},
+                )
+                db.add(org)
+                print(f"[Portal] Seeded org: {slug} ({display_name!r})")
+        db.commit()
+
+        # Step 2 — import the v1 JSON profile for any pilot that doesn't yet
+        # have a current OrgProfileVersion.
+        for slug, profile_path in PROFILE_IMPORTS.items():
+            org = db.query(Organization).filter_by(slug=slug).one_or_none()
+            if org is None:
+                # Shouldn't happen because we just seeded — defensive.
+                continue
+
+            has_current = (
+                db.query(OrgProfileVersion)
+                  .filter(OrgProfileVersion.org_id == org.id,
+                          OrgProfileVersion.is_current == True)  # noqa: E712
+                  .count()
+            ) > 0
+            if has_current:
+                continue
+
+            if not profile_path.exists():
+                print(
+                    f"[Portal] Profile file missing for {slug}: {profile_path} "
+                    f"— skipping initial version import."
+                )
+                continue
+
+            try:
+                with profile_path.open("r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                create_next_version(
+                    db,
+                    org_id             = org.id,
+                    payload            = payload,
+                    created_by_user_id = None,   # system-seeded
+                )
+                db.commit()
+                print(f"[Portal] Imported initial OrgProfileVersion for {slug}")
+            except Exception as e:
+                db.rollback()
+                print(f"[Portal] Failed to import profile for {slug}: {e}")
+
+    except Exception as e:
+        print(f"[Portal] Error seeding orgs: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
 def _seed_initial_admin() -> None:
     """
     Creates the first Admin user for Deborah's Place if no users exist.
@@ -211,10 +314,14 @@ def _seed_initial_admin() -> None:
 
     If these are not set, default credentials are used.
     Change the password immediately after first login.
+
+    As of v2 Phase 0 the admin row is tied to the Deborah's Place
+    Organization via org_id; org_name remains as a denormalized convenience.
     """
     from database.db import SessionLocal
-    from portal.models.user import User, UserRole
-    from portal.auth.security import hash_password
+    from portal.models.user         import User, UserRole
+    from portal.models.organization import Organization
+    from portal.auth.security       import hash_password
 
     db = SessionLocal()
     try:
@@ -228,10 +335,28 @@ def _seed_initial_admin() -> None:
         admin_name     = os.getenv("ADMIN_NAME",     "Mary Kelly")
         admin_org      = os.getenv("ADMIN_ORG",      "Deborah's Place")
 
+        # Find the matching Organization row (created by _seed_initial_orgs).
+        # We match on display_name first; fall back to slug for forgiving env
+        # values like "deborahs-place".
+        org_row = (
+            db.query(Organization)
+              .filter(
+                  (Organization.display_name == admin_org) |
+                  (Organization.slug         == admin_org)
+              )
+              .one_or_none()
+        )
+        if org_row is None:
+            raise RuntimeError(
+                f"Cannot seed admin user — no Organization row matches "
+                f"ADMIN_ORG={admin_org!r}. Did _seed_initial_orgs() run?"
+            )
+
         admin = User(
             email           = admin_email,
             full_name       = admin_name,
-            org_name        = admin_org,
+            org_id          = org_row.id,
+            org_name        = org_row.display_name,
             hashed_password = hash_password(admin_password),
             role            = UserRole.ADMIN,
             is_active       = True,
@@ -242,7 +367,7 @@ def _seed_initial_admin() -> None:
         db.commit()
 
         print(f"[Portal] First admin created: {admin_email}")
-        print(f"[Portal] Organization: {admin_org}")
+        print(f"[Portal] Organization: {org_row.display_name} (slug={org_row.slug})")
         print(f"[Portal] ⚠️  Change the default password immediately after login")
 
     except Exception as e:

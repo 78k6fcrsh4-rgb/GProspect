@@ -271,20 +271,66 @@ class OrgProfile(BaseModel):
         """
         Locate and load the profile JSON for the given organization.
 
-        Scans `profiles_dir` for any *.json (skipping the template), loads each
-        one defensively, and returns the first profile whose org_name matches
-        case-insensitively. Returns None if the directory is missing or no
-        matching profile is found. Designed as the single source of truth for
-        the router layer — replaces the previously duplicated `_load_profile`
-        helpers in admin/results/feedback routers.
+        v2 lookup order (Phase 0):
+          1. Try the database first — if a SessionLocal is available and a
+             matching Organization has a current OrgProfileVersion, parse
+             its JSON payload through this Pydantic model and return it.
+             This is what the portal routes want.
+          2. Fall back to the filesystem — scan `profiles_dir` for any
+             *.json (skipping the template). This is what the CLI tools
+             (run_agent.py) want, and also what the portal needs if the
+             org hasn't yet completed Phase 1 intake.
+
+        Returns None if neither path finds a match. Designed as the single
+        source of truth for the router layer — replaces the previously
+        duplicated `_load_profile` helpers in admin/results/feedback routers.
 
         Args:
             org_name:     The organization name to match (case-insensitive).
+                          Matched against Organization.display_name in the DB
+                          and OrgProfile.org_name on disk.
             profiles_dir: Directory containing profile JSON files.
 
         Returns:
             The matching OrgProfile, or None if not found.
         """
+        # ── DB-first lookup ───────────────────────────────────────────────────
+        # Imported lazily so this module remains usable from the CLI without
+        # requiring the SQLAlchemy stack to be installed/importable.
+        try:
+            from database.db                 import SessionLocal
+            from portal.models.organization  import Organization
+            from portal.models.org_profile   import OrgProfileVersion
+        except Exception:
+            SessionLocal = None  # type: ignore[assignment]
+
+        if SessionLocal is not None:
+            db = SessionLocal()
+            try:
+                org = (
+                    db.query(Organization)
+                      .filter(Organization.display_name.ilike(org_name))
+                      .one_or_none()
+                )
+                if org is not None:
+                    version = (
+                        db.query(OrgProfileVersion)
+                          .filter(OrgProfileVersion.org_id     == org.id,
+                                  OrgProfileVersion.is_current == True)  # noqa: E712
+                          .one_or_none()
+                    )
+                    if version is not None and version.payload:
+                        try:
+                            return cls.model_validate(version.payload)
+                        except Exception:
+                            # If the persisted payload fails validation
+                            # (schema drift, mid-Phase-1 transition), fall
+                            # through to the filesystem.
+                            pass
+            finally:
+                db.close()
+
+        # ── Filesystem fallback ───────────────────────────────────────────────
         profiles_path = Path(profiles_dir)
         if not profiles_path.exists():
             return None

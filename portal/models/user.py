@@ -17,8 +17,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    Boolean, Column, DateTime, Integer, String, Enum
+    Boolean, Column, DateTime, ForeignKey, Integer, String, Enum
 )
+from sqlalchemy.orm import relationship
 import enum
 
 from database.db import Base
@@ -54,7 +55,21 @@ class User(Base):
     # ── Identity ──────────────────────────────────────────────────────────────
     email       = Column(String, unique=True, index=True, nullable=False)
     full_name   = Column(String, nullable=False)
-    org_name    = Column(String, nullable=False, index=True)
+
+    # ── Tenancy ───────────────────────────────────────────────────────────────
+    # org_id is the canonical tenant scope as of Phase 0 (v2). All cross-org
+    # access checks read this column. org_name is kept as a denormalized
+    # convenience that mirrors organization.display_name — it's used by code
+    # that hasn't yet been migrated to look up via org_id (filesystem-based
+    # profile lookup and outputs/ paths). When the seeder/migration creates
+    # or backfills a row, both fields are populated in sync.
+    org_id   = Column(
+        Integer,
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
+        nullable = False,
+        index    = True,
+    )
+    org_name = Column(String, nullable=False, index=True)
 
     # ── Authentication ────────────────────────────────────────────────────────
     hashed_password = Column(String, nullable=False)
@@ -87,6 +102,9 @@ class User(Base):
     reset_token            = Column(String, nullable=True)
     reset_token_expires_at = Column(DateTime, nullable=True)
 
+    # ── Relationships ─────────────────────────────────────────────────────────
+    organization = relationship("Organization", back_populates="users")
+
     def __repr__(self) -> str:
         return (
             f"User(id={self.id}, email={self.email}, "
@@ -107,6 +125,7 @@ class User(Base):
             "id":           self.id,
             "email":        self.email,
             "full_name":    self.full_name,
+            "org_id":       self.org_id,
             "org_name":     self.org_name,
             "role":         self.role.value,
             "is_active":    self.is_active,

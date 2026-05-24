@@ -127,8 +127,12 @@ def create_tables() -> None:
     All model files must be imported before calling this
     so SQLAlchemy knows about them.
     """
-    # Import all models here so Base knows about them
-    from portal.models import user, result, learning  # noqa: F401
+    # Import all models here so Base knows about them.
+    # Order matters: organization first because user/result/learning/profile
+    # all have FKs into it.
+    from portal.models import (                                   # noqa: F401
+        organization, org_profile, user, result, learning,
+    )
 
     Base.metadata.create_all(bind=engine)
     print(f"[Database] Tables created — {DATABASE_URL}")
@@ -140,34 +144,90 @@ def run_lightweight_migrations() -> None:
 
     Bridges the gap until Alembic is introduced. `Base.metadata.create_all`
     only creates *missing* tables — it does NOT add new columns to existing
-    tables. When we ship a new column on a model, an existing local database
-    needs an ALTER TABLE to pick it up. This helper performs those ALTERs
-    only when the column is genuinely missing, so it's safe to call on every
-    startup and a no-op on fresh databases (where create_all already built
-    the columns).
+    tables, and it doesn't backfill data. This helper handles both, only
+    when the work hasn't been done, so it's safe to call on every startup
+    and a no-op on fresh databases.
 
-    Replace this with proper migrations (Alembic) before any non-trivial
-    schema change. Adds here should be paired with a matching column on the
-    model so create_all handles fresh DBs.
+    Replace with proper migrations (Alembic) before any non-trivial schema
+    change. Adds here should be paired with a matching column on the model
+    so create_all handles fresh DBs.
+
+    Phase-0-specific additions (v2):
+      - users.token_version (token revocation)         [shipped earlier]
+      - organizations table                            [Phase 0]
+      - org_profile_versions table                     [Phase 0]
+      - users.org_id FK + backfill from users.org_name [Phase 0]
+      - grant_results.org_id FK + backfill             [Phase 0]
+      - learning_entries.org_id FK + backfill          [Phase 0]
     """
     from sqlalchemy import inspect, text
 
     inspector = inspect(engine)
-    if "users" not in inspector.get_table_names():
-        return
+    table_names = set(inspector.get_table_names())
 
-    existing_cols = {c["name"] for c in inspector.get_columns("users")}
-
-    # users.token_version — added for token revocation on /auth/logout.
-    if "token_version" not in existing_cols:
-        with engine.begin() as conn:
-            conn.execute(
-                text(
+    # ── users.token_version (round-3 hardening — pre-v2) ──────────────────────
+    if "users" in table_names:
+        existing_cols = {c["name"] for c in inspector.get_columns("users")}
+        if "token_version" not in existing_cols:
+            with engine.begin() as conn:
+                conn.execute(text(
                     "ALTER TABLE users "
                     "ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0"
+                ))
+            print("[Database] Migration: added users.token_version")
+            inspector = inspect(engine)  # refresh after ALTER
+
+    # ── Phase 0: org_id FK on tenant-scoped tables ────────────────────────────
+    # We add the column as nullable so the ALTER succeeds on existing rows,
+    # backfill org_id from org_name (matching organization.display_name),
+    # then leave it nullable at the SQL level — application code enforces
+    # not-null via the model. (SQLite doesn't support ALTER COLUMN to add
+    # NOT NULL after the fact; Postgres would, but we'll handle that when
+    # we migrate.)
+    _add_org_id_to_table(inspector, "users")
+    _add_org_id_to_table(inspector, "grant_results")
+    _add_org_id_to_table(inspector, "learning_entries")
+
+
+def _add_org_id_to_table(inspector, table_name: str) -> None:
+    """
+    Idempotent helper: adds `org_id INTEGER` to the named table if missing,
+    then backfills any NULL org_id rows by matching org_name against
+    organizations.display_name. Safe on fresh databases (no-op when column
+    already exists or table doesn't exist).
+    """
+    from sqlalchemy import text
+
+    if table_name not in set(inspector.get_table_names()):
+        return
+
+    existing_cols = {c["name"] for c in inspector.get_columns(table_name)}
+    if "org_id" not in existing_cols:
+        with engine.begin() as conn:
+            conn.execute(text(
+                f"ALTER TABLE {table_name} ADD COLUMN org_id INTEGER"
+            ))
+        print(f"[Database] Migration: added {table_name}.org_id")
+
+    # Backfill — works whether the column was just added or has existed for a
+    # while but contains NULLs (e.g. seeded before the orgs table existed).
+    # We update only the rows where org_id is NULL so this is cheap on
+    # already-migrated DBs.
+    if "organizations" in set(inspector.get_table_names()):
+        with engine.begin() as conn:
+            result = conn.execute(text(
+                f"UPDATE {table_name} "
+                f"   SET org_id = ("
+                f"       SELECT id FROM organizations "
+                f"        WHERE organizations.display_name = {table_name}.org_name"
+                f"   ) "
+                f" WHERE org_id IS NULL AND org_name IS NOT NULL"
+            ))
+            if result.rowcount:
+                print(
+                    f"[Database] Migration: backfilled {result.rowcount} "
+                    f"{table_name}.org_id rows from org_name"
                 )
-            )
-        print("[Database] Migration: added users.token_version")
 
 
 def get_db_stats() -> dict:

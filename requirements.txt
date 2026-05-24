@@ -16,6 +16,9 @@ pydantic[email]>=2.7.0           # EmailStr
 # Auth
 python-jose[cryptography]>=3.3.0 # JWT
 passlib[bcrypt]>=1.7.4           # password hashing
+# bcrypt 4.1+ raises on >72-byte secrets which breaks passlib's internal
+# detect_wrap_bug() probe. Pin <4.1 until passlib publishes a fix.
+bcrypt>=4.0.0,<4.1.0
 slowapi>=0.1.9                   # rate limiting (login brute-force defense)
 
 # Agent / data sources
@@ -24,3 +27,7 @@ requests>=2.31.0                 # grants.gov, IRS 990
 
 # Export
 openpyxl>=3.1.2                  # Excel export
+
+# Test runner (used by tests/ — not loaded at runtime by the portal)
+pytest>=8.0.0
+httpx>=0.27.0                    # FastAPI TestClient backend
