@@ -154,7 +154,7 @@ class GProspectAPI:
         self._raise(resp)
         return resp.json()
 
-    # ── Results (Phase 1b placeholder — keep working for v1 callers) ─────────
+    # ── Results (v1 — kept for the legacy summary) ───────────────────────────
 
     def get_results_summary(self) -> dict:
         return self._get("/results/summary")
@@ -164,3 +164,47 @@ class GProspectAPI:
         if min_score is not None:
             params["min_score"] = min_score
         return self._get("/results/", params=params)
+
+    # ── Opportunities (Phase 1b — enriched list + pursuit + narrative) ───────
+
+    def list_opportunities(
+        self,
+        *,
+        limit:     int = 200,
+        min_score: Optional[float] = None,
+        pursuit:   Optional[str]   = None,
+    ) -> list[dict]:
+        params: dict = {"limit": limit}
+        if min_score is not None:
+            params["min_score"] = min_score
+        if pursuit:
+            params["pursuit"] = pursuit
+        return self._get("/opportunities/", params=params)
+
+    def set_pursuit(self, opp_key: str, action: str,
+                    notes: Optional[str] = None) -> dict:
+        """action ∈ {'pursue', 'watch', 'pass', 'clear'}"""
+        if action == "clear":
+            return self._post(f"/opportunities/{opp_key}/clear")
+        return self._post(
+            f"/opportunities/{opp_key}/{action}",
+            json = {"notes": notes} if notes else {},
+        )
+
+    def get_or_generate_narrative(self, opp_key: str) -> dict:
+        return self._post(f"/opportunities/{opp_key}/narrative")
+
+    # ── Digest ───────────────────────────────────────────────────────────────
+
+    def generate_digest_zip(self) -> bytes:
+        """
+        Hit POST /digests/generate and return the raw ZIP bytes.
+        Caller is responsible for offering it as a download.
+        """
+        resp = requests.post(
+            f"{self.base_url}/digests/generate",
+            headers = self._headers(),
+            timeout = REQUEST_TIMEOUT_SECONDS,
+        )
+        self._raise(resp)
+        return resp.content

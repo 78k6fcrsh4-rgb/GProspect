@@ -128,10 +128,10 @@ def create_tables() -> None:
     so SQLAlchemy knows about them.
     """
     # Import all models here so Base knows about them.
-    # Order matters: organization first because user/result/learning/profile
-    # all have FKs into it.
+    # Order matters: organization first because user/result/learning/profile/
+    # opportunity all have FKs into it.
     from portal.models import (                                   # noqa: F401
-        organization, org_profile, user, result, learning,
+        organization, org_profile, user, result, learning, opportunity,
     )
 
     Base.metadata.create_all(bind=engine)

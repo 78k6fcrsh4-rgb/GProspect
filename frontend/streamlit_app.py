@@ -35,8 +35,9 @@ if str(_REPO_ROOT) not in sys.path:
 
 import streamlit as st
 
-from frontend.api    import API_URL, APIError, GProspectAPI
-from frontend.intake import render_intake
+from frontend.api       import API_URL, APIError, GProspectAPI
+from frontend.intake    import render_intake
+from frontend.prospects import render_pipeline, render_prospects
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -149,7 +150,8 @@ def render_sidebar() -> str:
 
         pages = [
             ("intake",    "📝 Intake"),
-            ("dashboard", "🎯 Dashboard"),
+            ("prospects", "🎯 Prospects"),
+            ("pipeline",  "📋 Pipeline"),
             ("history",   "🕒 Profile history"),
         ]
         for key, label in pages:
@@ -170,12 +172,12 @@ def render_sidebar() -> str:
 
 
 def _default_page() -> str:
-    """Land on Intake if no profile exists yet; otherwise the dashboard."""
+    """Land on Intake if no profile exists yet; otherwise Prospects."""
     try:
         profile = _api().get_current_profile()
     except APIError:
         return "intake"
-    return "dashboard" if profile else "intake"
+    return "prospects" if profile else "intake"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -284,8 +286,10 @@ def main() -> None:
 
     if page == "intake":
         render_intake(api, user)
-    elif page == "dashboard":
-        render_dashboard()
+    elif page == "prospects":
+        render_prospects(api, user)
+    elif page == "pipeline":
+        render_pipeline(api, user)
     elif page == "history":
         render_history()
     else:

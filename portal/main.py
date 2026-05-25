@@ -152,12 +152,14 @@ app.add_middleware(
 # Each router handles a specific area of functionality.
 # ─────────────────────────────────────────────────────────────────────────────
 
-from portal.routers.auth     import router as auth_router
-from portal.routers.results  import router as results_router
-from portal.routers.admin    import router as admin_router
-from portal.routers.feedback import router as feedback_router
-from portal.routers.orgs     import router as orgs_router
-from portal.routers.profiles import router as profiles_router
+from portal.routers.auth          import router as auth_router
+from portal.routers.results       import router as results_router
+from portal.routers.admin         import router as admin_router
+from portal.routers.feedback      import router as feedback_router
+from portal.routers.orgs          import router as orgs_router
+from portal.routers.profiles      import router as profiles_router
+from portal.routers.opportunities import router as opportunities_router
+from portal.routers.digests       import router as digests_router
 
 app.include_router(auth_router)
 app.include_router(results_router)
@@ -165,6 +167,8 @@ app.include_router(admin_router)
 app.include_router(feedback_router)
 app.include_router(orgs_router)
 app.include_router(profiles_router)
+app.include_router(opportunities_router)
+app.include_router(digests_router)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
