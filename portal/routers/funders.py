@@ -24,6 +24,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from agent.discovery                 import discover_funders, DiscoveryResult
+from agent.peer_match                import (
+    find_peer_grants_for_funder,
+    warm_path_summary_for_org,
+)
 from agent.profile                   import OrgProfile
 from database.db                     import SessionLocal, get_db
 from portal.auth.dependencies        import get_current_admin, get_current_user
@@ -178,6 +182,134 @@ def _fetch_propublica_detail(ein: str) -> dict:
                 "updated":      f.updated,
             }
             for f in filings
+        ],
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Warm paths (Phase 3b)
+# The /warm-paths/summary route uses a literal first segment; the
+# /{ein}/warm-paths route is two-segment with a parameterized first and
+# literal second. Neither overlaps with the single-segment /{ein} route
+# above, so declaration order is not load-bearing.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/warm-paths/summary")
+def get_warm_path_summary(
+    current_user: User    = Depends(get_current_user),
+    db:           Session = Depends(get_db),
+):
+    """
+    For each funder in the caller's active candidate pool, return a
+    one-row summary of warm-path activity (count of peer grants given
+    + most recent year + total $). Powers the per-row badge on the
+    Funders list.
+
+    Empty list when:
+      - org has no saved profile (we can't expand peer keywords)
+      - org has no active candidates
+      - candidates exist but none have been ingested yet
+    """
+    current_profile = get_current_for_org(db, current_user.org_id)
+    if current_profile is None:
+        return []
+
+    try:
+        profile = OrgProfile.model_validate(current_profile.payload or {})
+    except Exception as e:
+        log.warning("Profile validation failed for org_id=%s: %s",
+                    current_user.org_id, e)
+        return []
+
+    eins = [
+        c.ein for c in
+        db.query(FunderCandidate)
+          .filter(FunderCandidate.org_id == current_user.org_id,
+                  FunderCandidate.status != CandidateStatus.DISMISSED)
+          .all()
+    ]
+    if not eins:
+        return []
+
+    summaries = warm_path_summary_for_org(db, profile, eins)
+    # Sort: most peer grants first, then most recent year, then alpha
+    summaries.sort(
+        key = lambda s: (
+            -s.peer_grant_count,
+            -(s.most_recent_year or 0),
+            s.funder_name or "",
+        ),
+    )
+    return [
+        {
+            "funder_ein":       s.funder_ein,
+            "funder_name":      s.funder_name,
+            "peer_grant_count": s.peer_grant_count,
+            "most_recent_year": s.most_recent_year,
+            "total_amount":     s.total_amount,
+        }
+        for s in summaries
+    ]
+
+
+@router.get("/{ein}/warm-paths")
+def get_warm_paths_for_funder(
+    ein:          str,
+    limit:        int     = 25,
+    current_user: User    = Depends(get_current_user),
+    db:           Session = Depends(get_db),
+):
+    """
+    Return the funder's grants to recipients we've identified as peers
+    of the caller's org. Each hit includes the recipient identity,
+    grant amount/year, and a list of match reasons.
+
+    Used inside the funder detail expander to render the warm-paths
+    section.
+    """
+    candidate = get_candidate(db, org_id=current_user.org_id, ein=ein)
+    if candidate is None:
+        raise HTTPException(
+            status_code = status.HTTP_404_NOT_FOUND,
+            detail      = f"No FunderCandidate for EIN {ein!r} in this org.",
+        )
+
+    current_profile = get_current_for_org(db, current_user.org_id)
+    if current_profile is None:
+        return {
+            "ein":   ein,
+            "peer_grants": [],
+            "note":  "Save your organization profile before requesting warm paths.",
+        }
+
+    try:
+        profile = OrgProfile.model_validate(current_profile.payload or {})
+    except Exception as e:
+        return {
+            "ein":   ein,
+            "peer_grants": [],
+            "note":  f"Profile validation failed: {e}",
+        }
+
+    hits = find_peer_grants_for_funder(db, profile, ein, limit=limit)
+    return {
+        "ein":         ein,
+        "funder_name": candidate.funder_name,
+        "peer_grants": [
+            {
+                "grant_id":        h.grant_id,
+                "recipient_id":    h.recipient_id,
+                "recipient_name":  h.recipient_name,
+                "recipient_city":  h.recipient_city,
+                "recipient_state": h.recipient_state,
+                "recipient_ein":   h.recipient_ein,
+                "fiscal_year":     h.fiscal_year,
+                "amount":          h.amount,
+                "purpose":         h.purpose,
+                "score":           h.score,
+                "reasons":         h.reasons,
+            }
+            for h in hits
         ],
     }
 

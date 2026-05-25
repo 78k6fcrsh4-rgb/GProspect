@@ -50,7 +50,7 @@ def render_funders(api: GProspectAPI, user: dict) -> None:
 
     # ── Trigger row ───────────────────────────────────────────────────────────
     with st.container(border=True):
-        c1, c2 = st.columns([2, 5])
+        c1, c2, c3 = st.columns([2, 2, 4])
         if c1.button("🔍 Run discovery now", type="primary",
                      use_container_width=True):
             try:
@@ -59,13 +59,27 @@ def render_funders(api: GProspectAPI, user: dict) -> None:
                 st.error(f"Could not start discovery: {e.detail}")
             else:
                 st.success(resp.get("message") or "Discovery cycle queued.")
-        c2.caption(
-            "Discovery searches ProPublica's Nonprofit Explorer for in-state "
-            "foundations + grantmakers aligned with your NTEE focus, scores "
-            "them, and persists candidates. Typical run: ~30-60 seconds. "
-            "Re-run weekly; re-runs refresh scores without losing your "
-            "status decisions."
+        if c2.button("📥 Ingest 990 data", use_container_width=True):
+            try:
+                resp = api.trigger_grants_ingest()
+            except APIError as e:
+                st.error(f"Could not start ingestion: {e.detail}")
+            else:
+                st.success(resp.get("message") or "Ingestion queued.")
+        c3.caption(
+            "Discovery searches ProPublica for in-state foundations matching "
+            "your NTEE focus. Ingest pulls Schedule I grant detail from IRS "
+            "990 e-file data — this unlocks the **warm paths** below. "
+            "Re-run discovery weekly; ingest monthly."
         )
+
+    # ── Pull warm-path summary once for badge rendering ──────────────────────
+    try:
+        warm_summary = api.get_warm_path_summary()
+    except APIError as e:
+        st.warning(f"Couldn't load warm-path summary: {e.detail}")
+        warm_summary = []
+    warm_by_ein = {row["funder_ein"]: row for row in (warm_summary or [])}
 
     # ── Filter ────────────────────────────────────────────────────────────────
     f_label_to_value = dict(STATUS_FILTERS)
@@ -96,31 +110,42 @@ def render_funders(api: GProspectAPI, user: dict) -> None:
     st.write("")
 
     for cand in candidates:
-        _render_candidate_row(api, cand)
+        warm = warm_by_ein.get(cand.get("ein"))
+        _render_candidate_row(api, cand, warm=warm)
 
 
-def _render_candidate_row(api: GProspectAPI, cand: dict) -> None:
+def _render_candidate_row(api: GProspectAPI, cand: dict,
+                           warm: Optional[dict] = None) -> None:
     status_label = STATUS_BADGE.get(cand.get("status"), "")
     state        = cand.get("funder_state") or ""
     ntee         = cand.get("ntee_code") or ""
     score        = cand.get("score") or 0.0
 
+    warm_badge = ""
+    if warm and (warm.get("peer_grant_count") or 0) > 0:
+        n = warm["peer_grant_count"]
+        warm_badge = f"  ·  🤝 **{n} warm path{'' if n == 1 else 's'}**"
+
     label = (
         f"**{cand['funder_name']}**  ·  "
         f"Score **{score:.2f}**  ·  "
-        f"{state} {ntee}  ·  {status_label}"
+        f"{state} {ntee}  ·  {status_label}{warm_badge}"
     ).strip(" ·")
     with st.expander(label, expanded=False):
-        _render_candidate_expanded(api, cand)
+        _render_candidate_expanded(api, cand, warm=warm)
 
 
-def _render_candidate_expanded(api: GProspectAPI, cand: dict) -> None:
+def _render_candidate_expanded(api: GProspectAPI, cand: dict,
+                                warm: Optional[dict] = None) -> None:
     ein     = cand.get("ein")
     signals = cand.get("signals") or {}
 
     # ── Rationale ─────────────────────────────────────────────────────────────
     st.markdown("##### Why surfaced")
     st.markdown(cand.get("rationale") or "_(no rationale captured)_")
+
+    # ── Warm paths ────────────────────────────────────────────────────────────
+    _render_warm_paths(api, ein, warm)
 
     # ── Structured signals ────────────────────────────────────────────────────
     with st.expander("Structured signals", expanded=False):
@@ -237,6 +262,74 @@ def _render_propublica_detail(detail: dict) -> None:
         chart_df = chart_df.sort_values("Year")
         st.caption("Total assets, end of year")
         st.line_chart(chart_df.set_index("Year")["Assets"])
+
+
+def _render_warm_paths(api: GProspectAPI, ein: Optional[str],
+                        warm_summary: Optional[dict]) -> None:
+    """
+    Render the warm-paths section: how many peer grants this funder has
+    given + the inline list of peer recipients.
+
+    Cheap path: if the per-funder summary already says 0 peer grants,
+    show the "no warm paths" hint without fetching the detail list.
+    """
+    st.markdown("##### Warm paths")
+    if not ein:
+        st.caption("Missing EIN — can't look up warm paths.")
+        return
+
+    if warm_summary is not None and (warm_summary.get("peer_grant_count") or 0) == 0:
+        st.caption(
+            "No grants ingested for this funder yet, or none to peers in your "
+            "state. Try **Ingest 990 data** above to pull Schedule I from the "
+            "IRS, then re-open this card."
+        )
+        return
+
+    detail_key = f"warm_paths_{ein}"
+    if detail_key not in st.session_state:
+        if st.button("Load peer grants", key=f"loadwarm_{ein}"):
+            try:
+                resp = api.get_warm_paths_for_funder(ein)
+            except APIError as e:
+                st.error(f"Couldn't load warm paths: {e.detail}")
+                return
+            st.session_state[detail_key] = resp
+            st.rerun()
+        else:
+            n = (warm_summary or {}).get("peer_grant_count") or 0
+            st.caption(
+                f"{n} peer grant{'' if n == 1 else 's'} on record. "
+                f"Click above to load the recipient list."
+            )
+        return
+
+    resp        = st.session_state[detail_key]
+    peer_grants = resp.get("peer_grants") or []
+    note        = resp.get("note")
+    if note:
+        st.caption(note)
+    if not peer_grants:
+        st.caption("No peer grants found for this funder.")
+        return
+
+    rows = []
+    for g in peer_grants:
+        rows.append({
+            "Recipient":   g["recipient_name"],
+            "Location":    " ".join(
+                bit for bit in (g.get("recipient_city"), g.get("recipient_state"))
+                if bit
+            ),
+            "Year":        g.get("fiscal_year") or "—",
+            "Amount":      _fmt_usd(g.get("amount")),
+            "Why peer":    ", ".join(g.get("reasons") or []),
+        })
+    st.dataframe(
+        pd.DataFrame(rows),
+        hide_index          = True,
+        use_container_width = True,
+    )
 
 
 def _fmt_usd(v) -> str:

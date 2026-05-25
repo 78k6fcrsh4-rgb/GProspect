@@ -231,3 +231,19 @@ class GProspectAPI:
 
     def trigger_discovery_run(self) -> dict:
         return self._post("/discovery/run")
+
+    def get_warm_path_summary(self) -> list[dict]:
+        """Per-candidate warm-path counts. Powers the Funders-list badge."""
+        return self._get("/funders/warm-paths/summary")
+
+    def get_warm_paths_for_funder(self, ein: str) -> dict:
+        """Peer grants this funder has given to peers of the caller's org."""
+        return self._get(f"/funders/{ein}/warm-paths")
+
+    # ── Grants (Phase 3a) ────────────────────────────────────────────────────
+
+    def trigger_grants_ingest(self) -> dict:
+        return self._post("/grants/ingest")
+
+    def get_grants_status(self) -> list[dict]:
+        return self._get("/grants/status")
