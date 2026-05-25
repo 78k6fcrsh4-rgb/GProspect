@@ -160,6 +160,8 @@ from portal.routers.orgs          import router as orgs_router
 from portal.routers.profiles      import router as profiles_router
 from portal.routers.opportunities import router as opportunities_router
 from portal.routers.digests       import router as digests_router
+from portal.routers.funders       import router as funders_router
+from portal.routers.funders       import discovery_rtr as discovery_router
 
 app.include_router(auth_router)
 app.include_router(results_router)
@@ -169,6 +171,8 @@ app.include_router(orgs_router)
 app.include_router(profiles_router)
 app.include_router(opportunities_router)
 app.include_router(digests_router)
+app.include_router(funders_router)
+app.include_router(discovery_router)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

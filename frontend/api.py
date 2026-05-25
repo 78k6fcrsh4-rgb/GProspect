@@ -208,3 +208,26 @@ class GProspectAPI:
         )
         self._raise(resp)
         return resp.content
+
+    # ── Funder discovery (Phase 2) ───────────────────────────────────────────
+
+    def list_funder_candidates(self, *,
+                               status_filter: Optional[str] = None,
+                               limit:         int           = 200) -> list[dict]:
+        params: dict = {"limit": limit}
+        if status_filter:
+            params["pursuit_status"] = status_filter
+        return self._get("/funders/candidates", params=params)
+
+    def get_funder_detail(self, ein: str) -> dict:
+        return self._get(f"/funders/{ein}")
+
+    def set_candidate_status(self, ein: str, status: str,
+                             notes: Optional[str] = None) -> dict:
+        return self._post(
+            f"/funders/{ein}/status",
+            json = {"status": status, "notes": notes},
+        )
+
+    def trigger_discovery_run(self) -> dict:
+        return self._post("/discovery/run")

@@ -38,6 +38,7 @@ import streamlit as st
 from frontend.api       import API_URL, APIError, GProspectAPI
 from frontend.intake    import render_intake
 from frontend.prospects import render_pipeline, render_prospects
+from frontend.funders   import render_funders
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -151,6 +152,7 @@ def render_sidebar() -> str:
         pages = [
             ("intake",    "📝 Intake"),
             ("prospects", "🎯 Prospects"),
+            ("funders",   "🏛️ Funders"),
             ("pipeline",  "📋 Pipeline"),
             ("history",   "🕒 Profile history"),
         ]
@@ -288,6 +290,8 @@ def main() -> None:
         render_intake(api, user)
     elif page == "prospects":
         render_prospects(api, user)
+    elif page == "funders":
+        render_funders(api, user)
     elif page == "pipeline":
         render_pipeline(api, user)
     elif page == "history":
