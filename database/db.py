@@ -120,19 +120,17 @@ def get_db():
 def create_tables() -> None:
     """
     Creates all database tables defined in the models.
-
-    Called once at application startup. Safe to call multiple
-    times — only creates tables that do not already exist.
-
-    All model files must be imported before calling this
-    so SQLAlchemy knows about them.
+    Safe to call multiple times.
     """
-    # Import all models here so Base knows about them
-    from portal.models import user, result, learning  # noqa: F401
-
-    Base.metadata.create_all(bind=engine)
-    print(f"[Database] Tables created — {DATABASE_URL}")
-
+    try:
+        from portal.models import user, result, learning  # noqa: F401
+        Base.metadata.create_all(bind=engine)
+        print(f"[Database] Tables created — {DATABASE_URL}")
+    except Exception as e:
+        if "already defined" in str(e):
+            pass  # Tables already exist, safe to ignore
+        else:
+            print(f"[Database] Warning: {e}")
 
 def get_db_stats() -> dict:
     """

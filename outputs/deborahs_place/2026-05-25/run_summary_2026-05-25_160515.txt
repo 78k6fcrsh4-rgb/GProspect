@@ -1,0 +1,23 @@
+============================================================
+GRANT PROSPECTING RUN SUMMARY
+Organization: Deborah's Place
+Date: May 25, 2026
+Time: 16:05:15
+============================================================
+
+Raw results found:        1
+Passed eligibility filter: 1
+Final ranked results:      1
+
+============================================================
+TOP RESULTS
+============================================================
+
+Rank 1: Bank of America Charitable Foundation
+  Program:  Stable Housing and Empowering Communities
+  Score:    5.06/5
+  Deadline: June 29, 2026 (35 days)
+  Award:    $5,000 – $50,000
+  Action:   Schedule application kickoff within the next 2 weeks.
+
+============================================================

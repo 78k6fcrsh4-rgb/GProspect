@@ -1,0 +1,25 @@
+# GProspect — runtime dependencies
+# Derived from actual imports across portal/, agent/, tools/, scoring/, learning/, output/.
+
+# Web portal (FastAPI)
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9          # required by OAuth2PasswordRequestForm
+
+# Database
+sqlalchemy>=2.0.30
+
+# Config / validation
+python-dotenv>=1.0.1
+pydantic[email]>=2.7.0           # EmailStr
+
+# Auth
+python-jose[cryptography]>=3.3.0 # JWT
+passlib[bcrypt]>=1.7.4           # password hashing
+
+# Agent / data sources
+anthropic>=0.34.0                # AI scoring + web search
+requests>=2.31.0                 # grants.gov, IRS 990
+
+# Export
+openpyxl>=3.1.2                  # Excel export
