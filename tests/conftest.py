@@ -35,6 +35,19 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-do-not-use-anywhere-else")
 os.environ.setdefault("CORS_ALLOW_ALL", "1")
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """
+    The /auth/login rate limit (5/min/IP) is global across tests within the
+    same pytest process. Without resetting, the 9th login across the test
+    suite hits 429. Reset between tests so each test starts clean.
+    """
+    from portal.limiter import limiter
+    limiter.reset()
+    yield
+    limiter.reset()
+
+
 @pytest.fixture()
 def engine(tmp_path):
     """Per-test SQLite engine in a tmp_path-scoped file."""

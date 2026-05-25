@@ -1,0 +1,7 @@
+# GProspect — frontend (Streamlit) dependencies.
+# Install into the same .venv as the backend; backend requirements.txt
+# remains the source of truth for the API service.
+
+streamlit>=1.36.0
+pandas>=2.2.0
+requests>=2.31.0

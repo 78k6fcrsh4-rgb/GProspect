@@ -28,6 +28,10 @@ requests>=2.31.0                 # grants.gov, IRS 990
 # Export
 openpyxl>=3.1.2                  # Excel export
 
+# Doc-assist (Phase 1a intake — text extraction from uploaded files)
+mammoth>=1.6.0                   # .docx → plain text
+pypdf>=4.0.0                     # .pdf → plain text
+
 # Test runner (used by tests/ — not loaded at runtime by the portal)
 pytest>=8.0.0
 httpx>=0.27.0                    # FastAPI TestClient backend
