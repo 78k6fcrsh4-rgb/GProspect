@@ -4,22 +4,19 @@ database/db.py
 Database setup and connection management for the grant
 prospecting agent portal.
 
-Uses SQLAlchemy with SQLite for development.
-Switch to PostgreSQL for production by changing DATABASE_URL
-in the .env file:
+Two engines supported:
+    sqlite:///./grant_prospector.db                     ← dev + tests
+    postgresql+psycopg://user:pass@host:5432/dbname     ← v2 prod (Phase 3+)
 
-    Development:  sqlite:///./grant_prospector.db
-    Production:   postgresql://user:password@host/dbname
+The bare `postgresql://...` URL is also accepted; SQLAlchemy maps it
+to its default driver (psycopg2). The `+psycopg` suffix targets the
+newer psycopg3 we pin in requirements.txt.
 
-All portal models import Base from this file and all
-portal routes import get_db from this file.
+Choose by setting DATABASE_URL in .env. Default is SQLite so zero-config
+local dev still works.
 
-Usage:
-    from database.db import get_db, Base, engine
-
-    # In a FastAPI route:
-    def my_route(db: Session = Depends(get_db)):
-        results = db.query(MyModel).all()
+All portal models import Base from this file and all portal routes
+import get_db from this file.
 """
 
 from __future__ import annotations
@@ -29,6 +26,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
@@ -44,31 +42,47 @@ DATABASE_URL = os.getenv(
     "sqlite:///./grant_prospector.db"
 )
 
+
+def _is_sqlite(url: str) -> bool:
+    return url.startswith("sqlite")
+
+
+def _is_postgres(url: str) -> bool:
+    return url.startswith("postgres")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Engine
-# The engine is the connection to the database.
-# connect_args is SQLite-specific — allows multiple threads to
-# share the same connection (needed for FastAPI's async nature).
+# Dialect-specific kwargs:
+#   - SQLite: needs `check_same_thread=False` for FastAPI's threadpool.
+#     Also: enable WAL + foreign_keys at connect-time via a PRAGMA hook.
+#   - Postgres: connection pool sized for a single-worker dev portal.
+#     pool_pre_ping detects + recycles stale connections after a long idle.
 # ─────────────────────────────────────────────────────────────────────────────
 
-if DATABASE_URL.startswith("sqlite"):
+if _is_sqlite(DATABASE_URL):
     engine = create_engine(
         DATABASE_URL,
         connect_args = {"check_same_thread": False},
-        echo         = False,  # Set to True to log all SQL queries
+        echo         = False,
     )
 
-    # Enable WAL mode for SQLite — better concurrent read performance
     @event.listens_for(engine, "connect")
-    def set_sqlite_pragma(dbapi_connection, connection_record):
+    def _set_sqlite_pragma(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
 else:
-    # PostgreSQL or other databases
-    engine = create_engine(DATABASE_URL, echo=False)
+    # Postgres (or anything else SQLAlchemy supports).
+    engine = create_engine(
+        DATABASE_URL,
+        pool_size     = 5,
+        max_overflow  = 5,
+        pool_pre_ping = True,
+        echo          = False,
+    )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Session factory
@@ -129,10 +143,11 @@ def create_tables() -> None:
     """
     # Import all models here so Base knows about them.
     # Order matters: organization first because user/result/learning/profile/
-    # opportunity/funder_candidate all have FKs into it.
+    # opportunity/funder_candidate all have FKs into it. The grant module's
+    # Funder / RecipientOrg / Grant are global (no org_id FK).
     from portal.models import (                                   # noqa: F401
         organization, org_profile, user, result, learning, opportunity,
-        funder_candidate,
+        funder_candidate, grant,
     )
 
     Base.metadata.create_all(bind=engine)
@@ -196,6 +211,10 @@ def _add_org_id_to_table(inspector, table_name: str) -> None:
     then backfills any NULL org_id rows by matching org_name against
     organizations.display_name. Safe on fresh databases (no-op when column
     already exists or table doesn't exist).
+
+    SQL syntax used here is the subset that's compatible across both
+    SQLite and Postgres — plain ALTER TABLE ... ADD COLUMN, correlated
+    subquery UPDATE.
     """
     from sqlalchemy import text
 
@@ -211,9 +230,8 @@ def _add_org_id_to_table(inspector, table_name: str) -> None:
         print(f"[Database] Migration: added {table_name}.org_id")
 
     # Backfill — works whether the column was just added or has existed for a
-    # while but contains NULLs (e.g. seeded before the orgs table existed).
-    # We update only the rows where org_id is NULL so this is cheap on
-    # already-migrated DBs.
+    # while but contains NULLs. Both SQLite and Postgres accept this
+    # correlated-subquery UPDATE syntax.
     if "organizations" in set(inspector.get_table_names()):
         with engine.begin() as conn:
             result = conn.execute(text(

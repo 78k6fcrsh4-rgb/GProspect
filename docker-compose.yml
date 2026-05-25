@@ -1,0 +1,40 @@
+# Local development Postgres for GProspect v2 Phase 3+.
+#
+# Phase 3 introduces three new tables (funders, recipient_orgs, grants)
+# that will eventually hold tens of thousands of rows + benefit from
+# jsonb/GIN indexing. SQLite still works (and is what the test suite
+# uses for speed) but Postgres is the canonical production target.
+#
+# Usage:
+#   docker-compose up -d postgres
+#   # set DATABASE_URL in .env:
+#   #   DATABASE_URL=postgresql+psycopg://gprospect:gprospect@localhost:5432/gprospect
+#   bash ~/WorkBench/AI4GSH/run_portal.sh
+#
+# Stop with: docker-compose down
+# Wipe data: docker-compose down -v        (volume is named 'pg_data')
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: gprospect_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     gprospect
+      POSTGRES_PASSWORD: gprospect
+      POSTGRES_DB:       gprospect
+    ports:
+      # Bound to localhost only — never expose Postgres to the network
+      # without setting a real password first.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test:     ["CMD-SHELL", "pg_isready -U gprospect -d gprospect"]
+      interval: 5s
+      timeout:  5s
+      retries:  10
+
+volumes:
+  pg_data:
+    name: gprospect_pg_data

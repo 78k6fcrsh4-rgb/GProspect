@@ -162,6 +162,7 @@ from portal.routers.opportunities import router as opportunities_router
 from portal.routers.digests       import router as digests_router
 from portal.routers.funders       import router as funders_router
 from portal.routers.funders       import discovery_rtr as discovery_router
+from portal.routers.grants        import router as grants_router
 
 app.include_router(auth_router)
 app.include_router(results_router)
@@ -173,6 +174,7 @@ app.include_router(opportunities_router)
 app.include_router(digests_router)
 app.include_router(funders_router)
 app.include_router(discovery_router)
+app.include_router(grants_router)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

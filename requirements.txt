@@ -8,6 +8,10 @@ python-multipart>=0.0.9          # required by OAuth2PasswordRequestForm
 
 # Database
 sqlalchemy>=2.0.30
+# Postgres driver — installed for Phase 3+. SQLite still works for tests
+# + zero-config local dev; Postgres becomes the canonical production target
+# when DATABASE_URL is set to a postgresql:// or postgresql+psycopg:// URL.
+psycopg[binary]>=3.2.0
 
 # Config / validation
 python-dotenv>=1.0.1
