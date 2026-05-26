@@ -175,6 +175,24 @@ def _render_opportunity_expanded(api: GProspectAPI, opp: dict) -> None:
     bucket_icon, bucket_help = BUCKET_BADGE.get(bucket, BUCKET_BADGE["unknown"])
     meta_cols[3].metric("Urgency",    f"{bucket_icon} {bucket.title()}", help=bucket_help)
 
+    # ── Capacity warnings (Phase 4a) ──────────────────────────────────────────
+    cap_fit = opp.get("capacity_fit") or {}
+    warnings = cap_fit.get("warnings") or []
+    if warnings:
+        with st.container(border=True):
+            label_icon = {
+                "closed_window": "⏸️",
+                "over":          "⚠️",
+                "tight":         "📊",
+                "open":          "✅",
+            }.get(cap_fit.get("fit_label"), "ℹ️")
+            st.markdown(
+                f"**{label_icon} Capacity check** "
+                f"(score adjustment: {cap_fit.get('score_adjustment'):+.2f})"
+            )
+            for w in warnings:
+                st.markdown(f"- {w}")
+
     # ── Conversational narrative (lazy fetch) ─────────────────────────────────
     narrative_key = f"narrative_{opp_key}"
     st.markdown("##### Why this fits")
@@ -281,6 +299,34 @@ def render_pipeline(api: GProspectAPI, user: dict) -> None:
         "Active pursuits, things you're watching, and recent passes. "
         "Generate the weekly digest here when you're ready to circulate."
     )
+
+    # ── Capacity / pursuit-budget meter (Phase 4a) ────────────────────────────
+    try:
+        cap = api.get_capacity_summary()
+    except APIError:
+        cap = None
+    if cap:
+        target = cap.get("active_pursuits_target") or 0
+        actual = cap.get("current_pursuing") or 0
+        util   = cap.get("utilization_pct") or 0
+        active_w = cap.get("closed_windows_active") or []
+        with st.container(border=True):
+            label = (
+                f"**Pursuit budget:** {actual} of {target} active "
+                f"({util:.0f}% utilization)"
+            )
+            st.markdown(label)
+            ratio = min((actual / target) if target else 0.0, 1.0)
+            # Color cue via emoji rather than custom CSS — keep it simple.
+            if actual > target:
+                st.error("⚠️ You're over capacity. Close something out before opening another pursuit.")
+            elif actual == target:
+                st.warning("📊 You're at capacity. New pursuits will be demoted in Prospects.")
+            else:
+                st.progress(ratio, text=f"Headroom: {target - actual}")
+            if active_w:
+                labels = ", ".join(w.get("label") or "Closed window" for w in active_w)
+                st.caption(f"⏸️ Currently inside closed window: {labels}.")
 
     # ── Digest button ─────────────────────────────────────────────────────────
     with st.container(border=True):

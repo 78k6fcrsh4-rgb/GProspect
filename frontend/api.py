@@ -247,3 +247,26 @@ class GProspectAPI:
 
     def get_grants_status(self) -> list[dict]:
         return self._get("/grants/status")
+
+    # ── Capacity (Phase 4a) ──────────────────────────────────────────────────
+
+    def get_capacity(self) -> dict:
+        return self._get("/orgs/me/capacity")
+
+    def put_capacity(self, *,
+                     active_pursuits_target: int,
+                     availability_windows: list[dict]) -> dict:
+        resp = requests.put(
+            f"{self.base_url}/orgs/me/capacity",
+            headers = self._headers(),
+            json    = {
+                "active_pursuits_target": active_pursuits_target,
+                "availability_windows":   availability_windows,
+            },
+            timeout = REQUEST_TIMEOUT_SECONDS,
+        )
+        self._raise(resp)
+        return resp.json()
+
+    def get_capacity_summary(self) -> dict:
+        return self._get("/opportunities/capacity-summary")

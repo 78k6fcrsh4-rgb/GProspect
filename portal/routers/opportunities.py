@@ -33,6 +33,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from agent.capacity_rank  import CapacityFit, assess_opportunity
 from agent.narrative      import generate_narrative
 from agent.opportunities  import (
     classify_deadline,
@@ -41,7 +42,9 @@ from agent.opportunities  import (
 )
 from database.db          import get_db
 from portal.auth.dependencies      import get_current_user
+from portal.models.capacity        import get_or_default as get_capacity_or_default
 from portal.models.opportunity     import (
+    OpportunityPursuit,
     PursuitStatus,
     clear_pursuit,
     get_narrative,
@@ -78,6 +81,7 @@ class OpportunityListItem(BaseModel):
     date_found:           Optional[str]   = None
     pursuit:              Optional[dict]  = None   # OpportunityPursuit.to_dict() or None
     has_narrative:        bool
+    capacity_fit:         Optional[dict]  = None   # CapacityFit.to_dict() or None
 
 
 class NarrativeResponse(BaseModel):
@@ -134,6 +138,18 @@ def list_opportunities(
     current_profile = get_current_for_org(db, current_user.org_id)
     profile_version = current_profile.version if current_profile else 0
 
+    # Capacity context, computed once per request.
+    capacity         = get_capacity_or_default(db, current_user.org_id)
+    db.commit()  # persist the default row if one was just inserted
+    current_pursuing = (
+        db.query(OpportunityPursuit)
+          .filter(OpportunityPursuit.org_id == current_user.org_id,
+                  OpportunityPursuit.status == PursuitStatus.PURSUING)
+          .count()
+    )
+    capacity_target  = capacity.active_pursuits_target
+    avail_windows    = capacity.availability_windows or []
+
     out: list[OpportunityListItem] = []
     for idx, row in enumerate(raw):
         score = _safe_float(row.get("score_final"))
@@ -166,12 +182,31 @@ def list_opportunities(
         narrative_row = get_narrative(db, current_user.org_id, opp_key, profile_version)
         has_narrative = narrative_row is not None
 
+        # Build the opportunity dict in the shape assess_opportunity expects,
+        # then merge the resulting CapacityFit into the response.
+        provisional_dict = {
+            "application_deadline": row.get("application_deadline") or None,
+            "pursuit":              pursuit_dict,
+        }
+        fit = assess_opportunity(
+            opportunity          = provisional_dict,
+            capacity_target      = capacity_target,
+            current_pursuing     = current_pursuing,
+            availability_windows = avail_windows,
+        )
+
+        # Re-rank by adding the capacity adjustment to score_final, when
+        # the row has a base score to adjust.
+        ranked_score = score
+        if score is not None and fit.score_adjustment:
+            ranked_score = score + fit.score_adjustment
+
         out.append(OpportunityListItem(
             rank                 = idx + 1,
             opp_key              = opp_key,
             funder_name          = funder,
             program_name         = program,
-            score_final          = score,
+            score_final          = ranked_score,
             application_deadline = row.get("application_deadline") or None,
             days_remaining       = days,
             deadline_bucket      = bucket,
@@ -182,6 +217,7 @@ def list_opportunities(
             date_found           = row.get("date_found") or None,
             pursuit              = pursuit_dict,
             has_narrative        = has_narrative,
+            capacity_fit         = fit.to_dict(),
         ))
 
         if len(out) >= limit:

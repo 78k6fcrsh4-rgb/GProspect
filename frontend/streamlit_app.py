@@ -39,6 +39,7 @@ from frontend.api       import API_URL, APIError, GProspectAPI
 from frontend.intake    import render_intake
 from frontend.prospects import render_pipeline, render_prospects
 from frontend.funders   import render_funders
+from frontend.capacity  import render_capacity
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -154,6 +155,7 @@ def render_sidebar() -> str:
             ("prospects", "🎯 Prospects"),
             ("funders",   "🏛️ Funders"),
             ("pipeline",  "📋 Pipeline"),
+            ("capacity",  "⚖️ Capacity"),
             ("history",   "🕒 Profile history"),
         ]
         for key, label in pages:
@@ -294,6 +296,8 @@ def main() -> None:
         render_funders(api, user)
     elif page == "pipeline":
         render_pipeline(api, user)
+    elif page == "capacity":
+        render_capacity(api, user)
     elif page == "history":
         render_history()
     else:
