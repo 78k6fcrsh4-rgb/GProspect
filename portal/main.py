@@ -70,6 +70,11 @@ async def lifespan(app: FastAPI):
     # Seed first admin user if no users exist
     _seed_initial_admin()
 
+    # Phase 4b — start the in-process orchestrator. No-op when
+    # ORCHESTRATOR_ENABLED is unset/falsy (default-on; opt out in test envs).
+    from agent.orchestrator import start_scheduler
+    start_scheduler()
+
     print("  Portal ready at http://localhost:8000")
     print("  API docs at    http://localhost:8000/docs")
     print("="*60 + "\n")
@@ -78,6 +83,8 @@ async def lifespan(app: FastAPI):
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
     print("\n[Portal] Shutting down gracefully...")
+    from agent.orchestrator import stop_scheduler
+    stop_scheduler()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -165,6 +172,7 @@ from portal.routers.funders       import discovery_rtr as discovery_router
 from portal.routers.grants        import router as grants_router
 from portal.routers.capacity      import capacity_rtr as capacity_router
 from portal.routers.capacity      import opps_extra   as opps_extra_router
+from portal.routers.orchestrator  import router as orchestrator_router
 
 app.include_router(auth_router)
 app.include_router(results_router)
@@ -179,6 +187,7 @@ app.include_router(discovery_router)
 app.include_router(grants_router)
 app.include_router(capacity_router)
 app.include_router(opps_extra_router)
+app.include_router(orchestrator_router)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

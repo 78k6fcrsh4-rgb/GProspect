@@ -74,6 +74,7 @@ def db_session(engine) -> Iterator[Session]:
     from database.db import Base
     from portal.models import (                            # noqa: F401
         organization, org_profile, user, result, learning,
+        opportunity, funder_candidate, grant, capacity, scheduled_run,
     )
     Base.metadata.create_all(bind=engine)
 
@@ -101,6 +102,7 @@ def client(engine) -> Iterator[TestClient]:
     from database.db import Base, get_db
     from portal.models import (                            # noqa: F401
         organization, org_profile, user, result, learning,
+        opportunity, funder_candidate, grant, capacity, scheduled_run,
     )
 
     Base.metadata.create_all(bind=engine)

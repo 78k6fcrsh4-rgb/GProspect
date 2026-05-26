@@ -270,3 +270,11 @@ class GProspectAPI:
 
     def get_capacity_summary(self) -> dict:
         return self._get("/opportunities/capacity-summary")
+
+    # ── Orchestrator (Phase 4b) ──────────────────────────────────────────────
+
+    def get_orchestrator_status(self) -> dict:
+        return self._get("/orchestrator/status")
+
+    def trigger_orchestrator_job(self, job_name: str) -> dict:
+        return self._post(f"/orchestrator/trigger/{job_name}")

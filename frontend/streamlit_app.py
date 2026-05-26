@@ -35,11 +35,12 @@ if str(_REPO_ROOT) not in sys.path:
 
 import streamlit as st
 
-from frontend.api       import API_URL, APIError, GProspectAPI
-from frontend.intake    import render_intake
-from frontend.prospects import render_pipeline, render_prospects
-from frontend.funders   import render_funders
-from frontend.capacity  import render_capacity
+from frontend.api          import API_URL, APIError, GProspectAPI
+from frontend.intake       import render_intake
+from frontend.prospects    import render_pipeline, render_prospects
+from frontend.funders      import render_funders
+from frontend.capacity     import render_capacity
+from frontend.orchestrator import render_orchestrator
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -151,13 +152,16 @@ def render_sidebar() -> str:
             st.session_state.page = _default_page()
 
         pages = [
-            ("intake",    "📝 Intake"),
-            ("prospects", "🎯 Prospects"),
-            ("funders",   "🏛️ Funders"),
-            ("pipeline",  "📋 Pipeline"),
-            ("capacity",  "⚖️ Capacity"),
-            ("history",   "🕒 Profile history"),
+            ("intake",       "📝 Intake"),
+            ("prospects",    "🎯 Prospects"),
+            ("funders",      "🏛️ Funders"),
+            ("pipeline",     "📋 Pipeline"),
+            ("capacity",     "⚖️ Capacity"),
+            ("history",      "🕒 Profile history"),
         ]
+        # Admin-only: orchestrator state isn't useful to regular users.
+        if (st.session_state.user or {}).get("role") == "admin":
+            pages.append(("orchestrator", "🔄 Orchestrator"))
         for key, label in pages:
             if st.button(
                 label,
@@ -298,6 +302,8 @@ def main() -> None:
         render_pipeline(api, user)
     elif page == "capacity":
         render_capacity(api, user)
+    elif page == "orchestrator":
+        render_orchestrator(api, user)
     elif page == "history":
         render_history()
     else:

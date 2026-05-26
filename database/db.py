@@ -147,7 +147,7 @@ def create_tables() -> None:
     # Funder / RecipientOrg / Grant are global (no org_id FK).
     from portal.models import (                                   # noqa: F401
         organization, org_profile, user, result, learning, opportunity,
-        funder_candidate, grant, capacity,
+        funder_candidate, grant, capacity, scheduled_run,
     )
 
     Base.metadata.create_all(bind=engine)
