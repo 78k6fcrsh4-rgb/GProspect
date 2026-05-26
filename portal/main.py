@@ -173,6 +173,7 @@ from portal.routers.grants        import router as grants_router
 from portal.routers.capacity      import capacity_rtr as capacity_router
 from portal.routers.capacity      import opps_extra   as opps_extra_router
 from portal.routers.orchestrator  import router as orchestrator_router
+from portal.routers.sources       import router as sources_router
 
 app.include_router(auth_router)
 app.include_router(results_router)
@@ -188,6 +189,7 @@ app.include_router(grants_router)
 app.include_router(capacity_router)
 app.include_router(opps_extra_router)
 app.include_router(orchestrator_router)
+app.include_router(sources_router)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -318,11 +320,108 @@ def _seed_initial_orgs() -> None:
                 db.rollback()
                 print(f"[Portal] Failed to import profile for {slug}: {e}")
 
+        # Step 3 — seed each pilot's MonitoredSource list (Phase 5) if their
+        # source pool is currently empty. Idempotent — re-running the seed
+        # doesn't duplicate sources.
+        _seed_pilot_sources(db)
+
     except Exception as e:
         print(f"[Portal] Error seeding orgs: {e}")
         db.rollback()
     finally:
         db.close()
+
+
+def _seed_pilot_sources(db) -> None:
+    """
+    Bootstrap the pilots' MonitoredSource lists.
+
+    Idempotent: only inserts if the org currently has zero sources of
+    its own. Doesn't touch global sources (NULL org_id).
+    """
+    from portal.models.organization import Organization
+    from portal.models.source       import MonitoredSource, SourceKind
+
+    PILOT_SOURCES = {
+        # Found Village (Cincinnati, youth welfare)
+        "found-village": [
+            {
+                "name":       "Greater Cincinnati Foundation — Grants",
+                "url":        "https://www.gcfdn.org/grants/",
+                "kind":       SourceKind.CUSTOM,
+                "parser_key": "gcf",
+            },
+            {
+                "name":       "Interact for Health — Grants",
+                "url":        "https://interactforhealth.org/grants/",
+                "kind":       SourceKind.CUSTOM,
+                "parser_key": "interact_for_health",
+            },
+            {
+                "name":       "United Way of Greater Cincinnati — News",
+                "url":        "https://www.uwgc.org/news",
+                "kind":       SourceKind.PAGE,
+                "parser_key": None,
+            },
+            {
+                "name":       "Ohio Department of Development — Funding",
+                "url":        "https://development.ohio.gov/funding",
+                "kind":       SourceKind.PAGE,
+                "parser_key": None,
+            },
+        ],
+        # Deborah's Place (Chicago, women's housing)
+        "deborahs-place": [
+            {
+                "name":       "MacArthur Foundation — Grants",
+                "url":        "https://www.macfound.org/grants/",
+                "kind":       SourceKind.CUSTOM,
+                "parser_key": "macarthur",
+            },
+            {
+                "name":       "Chicago Community Trust — Grants",
+                "url":        "https://www.cct.org/grants/",
+                "kind":       SourceKind.PAGE,
+                "parser_key": None,
+            },
+            {
+                "name":       "Polk Bros Foundation — Grants",
+                "url":        "https://www.polkbrosfdn.org/grants/",
+                "kind":       SourceKind.PAGE,
+                "parser_key": None,
+            },
+            {
+                "name":       "Crown Family Philanthropies — Grants",
+                "url":        "https://www.crown.org/grants",
+                "kind":       SourceKind.PAGE,
+                "parser_key": None,
+            },
+        ],
+    }
+
+    for slug, sources in PILOT_SOURCES.items():
+        org = db.query(Organization).filter_by(slug=slug).one_or_none()
+        if org is None:
+            continue
+        existing = (
+            db.query(MonitoredSource)
+              .filter(MonitoredSource.org_id == org.id)
+              .count()
+        )
+        if existing:
+            continue
+        for spec in sources:
+            db.add(MonitoredSource(
+                org_id     = org.id,
+                name       = spec["name"],
+                url        = spec["url"],
+                kind       = spec["kind"],
+                parser_key = spec["parser_key"],
+                config     = {},
+                enabled    = True,
+            ))
+        print(f"[Portal] Seeded {len(sources)} MonitoredSource row(s) for {slug}")
+    db.commit()
 
 
 def _seed_initial_admin() -> None:

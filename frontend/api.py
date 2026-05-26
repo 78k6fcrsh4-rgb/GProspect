@@ -278,3 +278,35 @@ class GProspectAPI:
 
     def trigger_orchestrator_job(self, job_name: str) -> dict:
         return self._post(f"/orchestrator/trigger/{job_name}")
+
+    # ── Sources (Phase 5) ────────────────────────────────────────────────────
+
+    def list_sources(self) -> list[dict]:
+        return self._get("/sources/")
+
+    def create_source(self, payload: dict) -> dict:
+        return self._post("/sources/", json=payload)
+
+    def update_source(self, source_id: int, payload: dict) -> dict:
+        resp = requests.put(
+            f"{self.base_url}/sources/{source_id}",
+            headers = self._headers(),
+            json    = payload,
+            timeout = REQUEST_TIMEOUT_SECONDS,
+        )
+        self._raise(resp)
+        return resp.json()
+
+    def delete_source(self, source_id: int) -> None:
+        resp = requests.delete(
+            f"{self.base_url}/sources/{source_id}",
+            headers = self._headers(),
+            timeout = REQUEST_TIMEOUT_SECONDS,
+        )
+        self._raise(resp)
+
+    def trigger_source_check(self, source_id: int) -> dict:
+        return self._post(f"/sources/{source_id}/check")
+
+    def get_source_runs(self, source_id: int) -> list[dict]:
+        return self._get(f"/sources/{source_id}/runs")

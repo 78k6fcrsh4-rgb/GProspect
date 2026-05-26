@@ -41,6 +41,7 @@ from frontend.prospects    import render_pipeline, render_prospects
 from frontend.funders      import render_funders
 from frontend.capacity     import render_capacity
 from frontend.orchestrator import render_orchestrator
+from frontend.sources      import render_sources
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -157,6 +158,7 @@ def render_sidebar() -> str:
             ("funders",      "🏛️ Funders"),
             ("pipeline",     "📋 Pipeline"),
             ("capacity",     "⚖️ Capacity"),
+            ("sources",      "📡 Sources"),
             ("history",      "🕒 Profile history"),
         ]
         # Admin-only: orchestrator state isn't useful to regular users.
@@ -302,6 +304,8 @@ def main() -> None:
         render_pipeline(api, user)
     elif page == "capacity":
         render_capacity(api, user)
+    elif page == "sources":
+        render_sources(api, user)
     elif page == "orchestrator":
         render_orchestrator(api, user)
     elif page == "history":

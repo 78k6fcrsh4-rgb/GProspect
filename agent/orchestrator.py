@@ -59,8 +59,9 @@ log = logging.getLogger(__name__)
 JOB_HEALTH_CHECK     = "nightly_health_check"
 JOB_DISCOVERY        = "weekly_discovery"
 JOB_GRANTS_INGESTION = "biweekly_grants_ingestion"
+JOB_SOURCE_CHECK     = "daily_source_check"
 
-ALL_JOBS = (JOB_HEALTH_CHECK, JOB_DISCOVERY, JOB_GRANTS_INGESTION)
+ALL_JOBS = (JOB_HEALTH_CHECK, JOB_DISCOVERY, JOB_GRANTS_INGESTION, JOB_SOURCE_CHECK)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -70,6 +71,7 @@ ALL_JOBS = (JOB_HEALTH_CHECK, JOB_DISCOVERY, JOB_GRANTS_INGESTION)
 DEFAULT_CRON_HEALTH    = "0 4 * * *"      # daily 04:00 UTC
 DEFAULT_CRON_DISCOVERY = "0 6 * * 1"      # Monday 06:00 UTC
 DEFAULT_CRON_INGEST    = "0 6 1,15 * *"   # 1st and 15th of month, 06:00 UTC
+DEFAULT_CRON_SOURCES   = "0 3 * * *"      # daily 03:00 UTC
 
 DEFAULT_JOBSTORE_URL   = "sqlite:///./orchestrator_jobs.db"
 
@@ -141,6 +143,13 @@ def start_scheduler() -> Optional[BackgroundScheduler]:
         trigger        = _cron_or_default("ORCHESTRATOR_INGEST_CRON", DEFAULT_CRON_INGEST),
         id             = JOB_GRANTS_INGESTION,
         name           = "Biweekly per-org IRS 990 ingestion",
+        replace_existing = True,
+    )
+    scheduler.add_job(
+        run_source_check_job,
+        trigger        = _cron_or_default("ORCHESTRATOR_SOURCES_CRON", DEFAULT_CRON_SOURCES),
+        id             = JOB_SOURCE_CHECK,
+        name           = "Daily monitored-source check",
         replace_existing = True,
     )
     scheduler.start()
@@ -330,6 +339,61 @@ def run_grants_ingestion_job() -> None:
         db.close()
 
 
+def run_source_check_job() -> None:
+    """
+    Daily monitored-source check. Iterates every enabled MonitoredSource
+    (own + global) across all orgs and runs check_source on each.
+    Per-source exceptions are caught + logged; one bad source doesn't
+    poison the rest of the fire.
+
+    Each (source) check produces:
+      - one SourceCheck audit row (in the sources table)
+      - one ScheduledRun row tying this orchestrator fire to the source's
+        outcome, with org_id set so per-tenant filtering works
+    """
+    from portal.models.source       import MonitoredSource
+    from tools.source_monitor       import check_source
+
+    db = SessionLocal()
+    try:
+        sources = (
+            db.query(MonitoredSource)
+              .filter(MonitoredSource.enabled.is_(True))
+              .all()
+        )
+        for source in sources:
+            row = log_run_started(
+                db, job_name=JOB_SOURCE_CHECK, org_id=source.org_id,
+            )
+            db.commit()
+            try:
+                result = check_source(db, source)
+                db.commit()
+                log_run_finished(
+                    db, row,
+                    status  = RunStatus.SUCCESS,
+                    message = (
+                        f"source={source.name} status={result.status.value} "
+                        f"items={result.items_found}"
+                    ),
+                )
+                db.commit()
+            except Exception as e:
+                log.exception("Source check failed for source_id=%s", source.id)
+                db.rollback()
+                row = (
+                    db.query(type(row)).filter_by(id=row.id).one()
+                )
+                log_run_finished(
+                    db, row,
+                    status  = RunStatus.FAILED,
+                    message = f"{type(e).__name__}: {e}",
+                )
+                db.commit()
+    finally:
+        db.close()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Manual fire — called by the router's POST /orchestrator/trigger
 # ─────────────────────────────────────────────────────────────────────────────
@@ -338,6 +402,7 @@ JOB_DISPATCH = {
     JOB_HEALTH_CHECK:     run_health_check_job,
     JOB_DISCOVERY:        run_discovery_job,
     JOB_GRANTS_INGESTION: run_grants_ingestion_job,
+    JOB_SOURCE_CHECK:     run_source_check_job,
 }
 
 
