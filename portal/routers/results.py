@@ -381,6 +381,56 @@ def _execute_run_in_background(
 # Private helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+# v1 CSV exporter writes human-friendly headers ("Funder Name", "Final Score",
+# etc.); v2 code reads snake_case. This map normalizes at load time so legacy
+# CSVs already on disk work without re-running the agent. Anything not in the
+# map passes through unchanged, so CSVs that already use snake_case are fine.
+_CSV_COLUMN_ALIASES = {
+    "Rank":                        "rank",
+    "Final Score":                 "score_final",
+    "Composite Score":             "score_composite",
+    "Funder Name":                 "funder_name",
+    "Program Name":                "program_name",
+    "Application Deadline":        "application_deadline",
+    "Days Remaining":              "days_remaining",
+    "Award Range":                 "award_range",
+    "Award Min":                   "award_min",
+    "Award Max":                   "award_max",
+    "Recommended Next Action":     "next_action",
+    "Prior Funder":                "is_prior_funder",
+    "Geographic Focus":            "geographic_focus",
+    "Eligibility Requirements":    "eligibility_requirements",
+    "Application URL":             "application_url",
+    "Application Method":          "application_method",
+    "Program Officer":             "program_officer",
+    "Funder Website":              "funder_website",
+    "Score: Geographic Alignment": "score_geographic",
+    "Reason: Geographic":          "reason_geographic",
+    "Score: Population Alignment": "score_population",
+    "Reason: Population":          "reason_population",
+    "Score: Budget Fit":           "score_budget",
+    "Reason: Budget":              "reason_budget",
+    "Score: Timeline Feasibility": "score_timeline",
+    "Reason: Timeline":            "reason_timeline",
+    "Description":                 "description",
+    "Focus Areas":                 "focus_areas",
+    "Required Documents":          "required_documents",
+    "Disqualifying Factors":       "disqualifying_factors",
+    "Completeness Notes":          "completeness_notes",
+    "Who Complete":                "who_complete",
+    "How Complete":                "how_complete",
+    "Data Source":                 "source",
+    "Source URL":                  "source_url",
+    "Date Found":                  "date_found",
+    "Organization":                "organization",
+}
+
+
+def _normalize_csv_keys(row: dict) -> dict:
+    """Translate v1 human-friendly CSV headers to snake_case canonical keys."""
+    return {_CSV_COLUMN_ALIASES.get(k, k): v for k, v in row.items()}
+
+
 def _load_latest_results(org_name: str) -> list[dict]:
     """
     Loads the most recent results from the outputs directory.
@@ -389,7 +439,9 @@ def _load_latest_results(org_name: str) -> list[dict]:
         org_name: Organization name to load results for.
 
     Returns:
-        List of result dictionaries or empty list.
+        List of result dictionaries with snake_case keys (after alias
+        normalization for v1-era CSVs). Empty list if no CSV is found
+        or any error occurs during parsing.
     """
     import csv
 
@@ -413,7 +465,7 @@ def _load_latest_results(org_name: str) -> list[dict]:
         with open(csv_files[0], "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                results.append(dict(row))
+                results.append(_normalize_csv_keys(dict(row)))
         return results
     except Exception as e:
         print(f"[Results] Error loading CSV: {e}")

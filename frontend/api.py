@@ -109,6 +109,15 @@ class GProspectAPI:
     def me(self) -> dict:
         return self._get("/auth/me")
 
+    def change_password(self, *, current_password: str, new_password: str) -> dict:
+        return self._post(
+            "/auth/change-password",
+            json = {
+                "current_password": current_password,
+                "new_password":     new_password,
+            },
+        )
+
     # ── Org ──────────────────────────────────────────────────────────────────
 
     def get_my_org(self) -> dict:

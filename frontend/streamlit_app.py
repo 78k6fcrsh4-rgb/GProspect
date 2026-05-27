@@ -42,6 +42,7 @@ from frontend.funders      import render_funders
 from frontend.capacity     import render_capacity
 from frontend.orchestrator import render_orchestrator
 from frontend.sources      import render_sources
+from frontend.account      import render_account
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -160,6 +161,7 @@ def render_sidebar() -> str:
             ("capacity",     "⚖️ Capacity"),
             ("sources",      "📡 Sources"),
             ("history",      "🕒 Profile history"),
+            ("account",      "👤 Account"),
         ]
         # Admin-only: orchestrator state isn't useful to regular users.
         if (st.session_state.user or {}).get("role") == "admin":
@@ -310,6 +312,8 @@ def main() -> None:
         render_orchestrator(api, user)
     elif page == "history":
         render_history()
+    elif page == "account":
+        render_account(api, user)
     else:
         st.error(f"Unknown page: {page}")
 
