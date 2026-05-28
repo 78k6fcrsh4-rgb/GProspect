@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+{% block title %}Add Grant Manually — GrantScout AI{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <h1 class="page-title">Add Grant Manually</h1>
+  <p class="page-subtitle">Add a grant opportunity you discovered outside the agent.</p>
+</div>
+
+<div class="form-section">
+
+  <!-- Row 1: Funder + Program Name -->
+  <div class="form-grid" style="gap: 16px;">
+    <div class="form-group">
+      <label class="form-label" for="funder_name">
+        Foundation / Funder Name <span class="form-required">*</span>
+      </label>
+      <input class="form-input" type="text" id="funder_name" name="funder_name"
+             placeholder="e.g. MacArthur Foundation" required />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="program_name">
+        Opportunity / Program Name <span class="form-required">*</span>
+      </label>
+      <input class="form-input" type="text" id="program_name" name="program_name"
+             placeholder="e.g. Safety and Justice Challenge" required />
+    </div>
+  </div>
+
+  <!-- Row 2: Description -->
+  <div class="form-grid cols-1" style="gap: 16px; margin-top: 16px;">
+    <div class="form-group">
+      <label class="form-label" for="description">Description</label>
+      <textarea class="form-textarea" id="description" name="description"
+                rows="4"
+                placeholder="Describe the grant opportunity, its focus areas, and why it's a good fit…"></textarea>
+    </div>
+  </div>
+
+  <!-- Row 3: Deadline + Temperature -->
+  <div class="form-grid" style="gap: 16px; margin-top: 16px;">
+    <div class="form-group">
+      <label class="form-label" for="deadline">
+        Deadline <span class="form-required">*</span>
+      </label>
+      <input class="form-input" type="date" id="deadline" name="deadline" required />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="temperature">
+        Temperature <span class="form-required">*</span>
+      </label>
+      <select class="form-select" id="temperature" name="temperature" required>
+        <option value="">Select…</option>
+        <option value="hot">🔥 Hot — deadline within 30 days</option>
+        <option value="warm">☀️ Warm — deadline within 60 days</option>
+        <option value="archival">🗄️ Less Warm — deadline 60+ days out</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Row 4: How discovered -->
+  <div class="form-grid cols-1" style="gap: 16px; margin-top: 16px;">
+    <div class="form-group">
+      <label class="form-label" for="discovery_source">
+        How did you discover this? <span class="form-required">*</span>
+      </label>
+      <select class="form-select" id="discovery_source" name="discovery_source" required>
+        <option value="">Select…</option>
+        <option value="Newsletter">Newsletter / Email List</option>
+        <option value="Colleague">Colleague / Referral</option>
+        <option value="Funder Website">Funder Website</option>
+        <option value="Foundation Directory">Foundation Directory (Candid, etc.)</option>
+        <option value="Social Media">Social Media</option>
+        <option value="Event / Conference">Event / Conference</option>
+        <option value="Prior Relationship">Prior Relationship with Funder</option>
+        <option value="Other">Other</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Row 5: Program Type + Location -->
+  <div class="form-grid" style="gap: 16px; margin-top: 16px;">
+    <div class="form-group">
+      <label class="form-label" for="program_type">Program Type</label>
+      <select class="form-select" id="program_type" name="program_type">
+        <option value="">Select…</option>
+        <option value="General Operating">General Operating Support</option>
+        <option value="Project / Program">Project / Program Specific</option>
+        <option value="Capital">Capital Campaign</option>
+        <option value="Capacity Building">Capacity Building</option>
+        <option value="Research">Research</option>
+        <option value="Planning">Planning Grant</option>
+        <option value="Emergency">Emergency / Rapid Response</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="location">Location / Geographic Focus</label>
+      <input class="form-input" type="text" id="location" name="location"
+             placeholder="e.g. Chicago, IL" />
+    </div>
+  </div>
+
+  <!-- Row 6: Award Min + Award Max -->
+  <div class="form-grid" style="gap: 16px; margin-top: 16px;">
+    <div class="form-group">
+      <label class="form-label" for="award_min">Award Min ($)</label>
+      <input class="form-input" type="number" id="award_min" name="award_min"
+             placeholder="e.g. 10000" min="0" step="1000" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="award_max">Award Max ($)</label>
+      <input class="form-input" type="number" id="award_max" name="award_max"
+             placeholder="e.g. 100000" min="0" step="1000" />
+    </div>
+  </div>
+
+  <!-- Row 7: Application URL -->
+  <div class="form-grid cols-1" style="gap: 16px; margin-top: 16px;">
+    <div class="form-group">
+      <label class="form-label" for="app_url">Application URL</label>
+      <input class="form-input" type="url" id="app_url" name="app_url"
+             placeholder="https://foundation.org/apply" />
+    </div>
+  </div>
+
+  <!-- Row 8: Eligibility Notes -->
+  <div class="form-grid cols-1" style="gap: 16px; margin-top: 16px;">
+    <div class="form-group">
+      <label class="form-label" for="eligibility">Eligibility Notes</label>
+      <textarea class="form-textarea" id="eligibility" name="eligibility"
+                rows="3"
+                placeholder="Any known eligibility requirements, restrictions, or notes…"></textarea>
+    </div>
+  </div>
+
+  <!-- Form actions -->
+  <div class="form-actions">
+    <button type="button" class="btn btn-secondary"
+            onclick="window.location='{{ url_for('dashboard.index') }}'">
+      Cancel
+    </button>
+    <button type="button" class="btn btn-primary" onclick="submitGrant(event)">
+      Add Grant
+    </button>
+  </div>
+
+</div>
+
+<!-- Error banner -->
+<div id="grantMsg" style="margin-top: 12px; display: none;"></div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Auto-set temperature based on deadline date
+  document.getElementById('deadline').addEventListener('change', function() {
+    var val = this.value;
+    if (!val) return;
+    var deadline = new Date(val);
+    var today    = new Date();
+    today.setHours(0, 0, 0, 0);
+    var days = Math.round((deadline - today) / (1000 * 60 * 60 * 24));
+    var tempSelect = document.getElementById('temperature');
+    if (days <= 30) {
+      tempSelect.value = 'hot';
+    } else if (days <= 60) {
+      tempSelect.value = 'warm';
+    } else {
+      tempSelect.value = 'archival';
+    }
+  });
+
+  function submitGrant(e) {
+    // Validate required fields
+    var funder  = document.getElementById('funder_name').value.trim();
+    var program = document.getElementById('program_name').value.trim();
+    var deadline = document.getElementById('deadline').value;
+    var temp    = document.getElementById('temperature').value;
+    var source  = document.getElementById('discovery_source').value;
+
+    if (!funder)  { showMsg('Funder name is required.', 'red'); return; }
+    if (!program) { showMsg('Program name is required.', 'red'); return; }
+    if (!deadline){ showMsg('Deadline is required.', 'red'); return; }
+    if (!temp)    { showMsg('Temperature is required.', 'red'); return; }
+    if (!source)  { showMsg('Discovery source is required.', 'red'); return; }
+
+    // Build award range string
+    var minVal = document.getElementById('award_min').value;
+    var maxVal = document.getElementById('award_max').value;
+    var awardRange = '';
+    if (minVal && maxVal) {
+      awardRange = '$' + parseInt(minVal).toLocaleString() +
+                   ' – $' + parseInt(maxVal).toLocaleString();
+    } else if (minVal) {
+      awardRange = '$' + parseInt(minVal).toLocaleString() + '+';
+    } else if (maxVal) {
+      awardRange = 'Up to $' + parseInt(maxVal).toLocaleString();
+    }
+
+    var data = {
+      funder_name:       funder,
+      program_name:      program,
+      description:       document.getElementById('description').value.trim(),
+      deadline:          deadline,
+      temperature:       temp,
+      discovery_source:  source,
+      program_type:      document.getElementById('program_type').value,
+      location:          document.getElementById('location').value.trim(),
+      award_min:         minVal ? parseInt(minVal) : null,
+      award_max:         maxVal ? parseInt(maxVal) : null,
+      award_range:       awardRange,
+      application_url:   document.getElementById('app_url').value.trim(),
+      eligibility:       document.getElementById('eligibility').value.trim(),
+    };
+
+    var btn = e.target;
+    btn.classList.add('btn-loading');
+    btn.disabled = true;
+
+    fetch('/grants/add', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(data)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      btn.classList.remove('btn-loading');
+      btn.disabled = false;
+      if (res.success) {
+        if (window.showFlash) window.showFlash('Grant added successfully!', 'success');
+        setTimeout(function() {
+          window.location = '{{ url_for("dashboard.index") }}';
+        }, 800);
+      } else {
+        showMsg(res.error || 'Failed to add grant.', 'red');
+      }
+    })
+    .catch(function() {
+      btn.classList.remove('btn-loading');
+      btn.disabled = false;
+      showMsg('Network error. Please try again.', 'red');
+    });
+  }
+
+  function showMsg(text, type) {
+    var el = document.getElementById('grantMsg');
+    el.innerHTML = '<div class="info-banner ' + type + '">✕ &nbsp;' + text + '</div>';
+    el.style.display = 'block';
+    setTimeout(function() { el.style.display = 'none'; }, 5000);
+  }
+</script>
+{% endblock %}

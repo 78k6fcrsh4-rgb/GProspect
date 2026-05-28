@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+{% block title %}Organization Profile — GrantScout AI{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <h1 class="page-title">Organization Profile</h1>
+  <p class="page-subtitle">This profile is used by the agent to find and score grant opportunities.</p>
+</div>
+
+<div class="form-section">
+
+  <!-- Organization Name -->
+  <div class="form-grid cols-1" style="gap: 16px;">
+
+    <div class="form-group">
+      <label class="form-label" for="org_name">Organization Name</label>
+      <input class="form-input" type="text" id="org_name" name="org_name"
+             value="{{ profile.org_name or '' }}"
+             placeholder="e.g. Deborah's Place" />
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="mission">Mission Statement</label>
+      <textarea class="form-textarea" id="mission" name="mission"
+                rows="3"
+                placeholder="Describe your organization's mission…">{{ profile.mission or '' }}</textarea>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="funding_needs">Funding Needs</label>
+      <textarea class="form-textarea" id="funding_needs" name="funding_needs"
+                rows="3"
+                placeholder="Describe the programs and initiatives you are seeking funding for…">{{ profile.funding_needs or '' }}</textarea>
+    </div>
+
+    <!-- Program Areas — tag multiselect -->
+    <div class="form-group">
+      <label class="form-label">Program Areas</label>
+
+      <div class="tag-input-wrap">
+        <div class="tag-list" id="tagList">
+          {% for area in profile.program_areas or [] %}
+          <span class="tag-item" data-value="{{ area | e }}">
+            {{ area }}
+            <button class="tag-remove" type="button" onclick="removeTag(this)">✕</button>
+          </span>
+          {% endfor %}
+        </div>
+
+        <!-- Preset dropdown -->
+        <div class="tag-add-row">
+          <select class="form-select" id="presetSelect"
+                  style="flex: 1; font-size: 12.5px; padding: 5px 28px 5px 8px;"
+                  onchange="addPresetTag(this)">
+            <option value="">Add from preset list…</option>
+            <option>Housing &amp; Homelessness</option>
+            <option>Mental Health</option>
+            <option>Substance Use Recovery</option>
+            <option>Workforce Development</option>
+            <option>Food Security</option>
+            <option>Domestic Violence</option>
+            <option>Legal Services</option>
+            <option>Children &amp; Youth</option>
+            <option>Seniors</option>
+            <option>Disability Services</option>
+            <option>Immigrant Services</option>
+            <option>LGBTQ+ Services</option>
+            <option>Education &amp; Literacy</option>
+            <option>Health Care Access</option>
+            <option>Community Development</option>
+            <option>Arts &amp; Culture</option>
+          </select>
+        </div>
+
+        <!-- Custom tag input -->
+        <div class="tag-add-row" style="margin-top: 6px;">
+          <input class="tag-text-input form-input" type="text" id="customTagInput"
+                 placeholder="Or type a custom area…"
+                 style="font-size: 12.5px;"
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTag();}" />
+          <button type="button" class="btn btn-secondary btn-sm" onclick="addCustomTag()">+</button>
+        </div>
+      </div>
+
+      <!-- Hidden input carries comma-separated value to server -->
+      <input type="hidden" id="programAreasHidden" name="program_areas"
+             value="{{ (profile.program_areas or []) | join(',') }}" />
+    </div>
+
+    <!-- Geographic Focus + Budget Range side by side -->
+    <div class="form-grid" style="gap: 16px;">
+      <div class="form-group">
+        <label class="form-label" for="geo_focus">Geographic Focus</label>
+        <select class="form-select" id="geo_focus" name="geographic_focus">
+          <option value="">Select…</option>
+          {% set geo_options = [
+            'Chicago, IL', 'Chicagoland', 'Cook County, IL',
+            'Illinois', 'Midwest', 'National'
+          ] %}
+          {% for opt in geo_options %}
+          <option value="{{ opt }}"
+            {% if profile.geographic_focus == opt %}selected{% endif %}>
+            {{ opt }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="budget_range">Budget Range</label>
+        <select class="form-select" id="budget_range" name="budget_range">
+          <option value="">Select…</option>
+          {% set budget_options = [
+            'Under $500K', 'Under $1M', '$1M–$5M',
+            '$5M–$10M', '$10M–$20M', '$20M+'
+          ] %}
+          {% for opt in budget_options %}
+          <option value="{{ opt }}"
+            {% if profile.budget_range == opt %}selected{% endif %}>
+            {{ opt }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="populations">Populations Served</label>
+      <textarea class="form-textarea" id="populations" name="populations_served"
+                rows="3"
+                placeholder="Describe the populations your organization serves…">{{ profile.populations_served or '' }}</textarea>
+    </div>
+
+  </div>
+
+  <!-- Form actions -->
+  <div class="form-actions">
+    <button type="button" class="btn btn-secondary" onclick="resetForm()">
+      Reset
+    </button>
+    <button type="button" class="btn btn-primary" onclick="saveProfile()">
+      Save changes
+    </button>
+  </div>
+
+</div>
+
+<!-- Success / error banners (shown after save) -->
+<div id="profileMsg" style="margin-top: 12px; display: none;"></div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // ── Tag system ─────────────────────────────────────────
+
+  function syncHidden() {
+    var tags = Array.from(document.querySelectorAll('#tagList .tag-item'))
+                    .map(function(el) { return el.getAttribute('data-value'); });
+    document.getElementById('programAreasHidden').value = tags.join(',');
+  }
+
+  function tagExists(value) {
+    return Array.from(document.querySelectorAll('#tagList .tag-item'))
+                .some(function(el) { return el.getAttribute('data-value') === value; });
+  }
+
+  function addTag(value) {
+    value = value.trim();
+    if (!value || tagExists(value)) return;
+
+    var span = document.createElement('span');
+    span.className = 'tag-item';
+    span.setAttribute('data-value', value);
+    span.innerHTML =
+      value +
+      '<button class="tag-remove" type="button" onclick="removeTag(this)">✕</button>';
+    document.getElementById('tagList').appendChild(span);
+    syncHidden();
+  }
+
+  function removeTag(btn) {
+    btn.closest('.tag-item').remove();
+    syncHidden();
+  }
+
+  function addPresetTag(select) {
+    if (!select.value) return;
+    addTag(select.value);
+    select.value = '';
+  }
+
+  function addCustomTag() {
+    var input = document.getElementById('customTagInput');
+    addTag(input.value);
+    input.value = '';
+  }
+
+  // ── Save profile ───────────────────────────────────────
+
+  function saveProfile() {
+    var data = {
+      org_name:          document.getElementById('org_name').value.trim(),
+      mission:           document.getElementById('mission').value.trim(),
+      funding_needs:     document.getElementById('funding_needs').value.trim(),
+      program_areas:     document.getElementById('programAreasHidden').value,
+      geographic_focus:  document.getElementById('geo_focus').value,
+      budget_range:      document.getElementById('budget_range').value,
+      populations_served: document.getElementById('populations').value.trim(),
+    };
+
+    var btn = event.target;
+    btn.classList.add('btn-loading');
+    btn.disabled = true;
+
+    fetch('/profile/save', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(data)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      btn.classList.remove('btn-loading');
+      btn.disabled = false;
+
+      var msgEl = document.getElementById('profileMsg');
+      if (res.success) {
+        msgEl.innerHTML =
+          '<div class="info-banner green">✓ &nbsp;Profile saved successfully.</div>';
+        if (window.showFlash) window.showFlash('Profile saved!', 'success');
+      } else {
+        msgEl.innerHTML =
+          '<div class="info-banner red">✕ &nbsp;' + (res.error || 'Save failed.') + '</div>';
+      }
+      msgEl.style.display = 'block';
+      setTimeout(function() { msgEl.style.display = 'none'; }, 4000);
+    })
+    .catch(function(err) {
+      btn.classList.remove('btn-loading');
+      btn.disabled = false;
+      if (window.showFlash) window.showFlash('Network error. Please try again.', 'error');
+    });
+  }
+
+  // ── Reset form ─────────────────────────────────────────
+
+  function resetForm() {
+    if (!confirm('Reset all fields to the last saved values?')) return;
+    window.location.reload();
+  }
+</script>
+{% endblock %}

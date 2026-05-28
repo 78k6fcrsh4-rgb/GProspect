@@ -1,8 +1,11 @@
 """
 portal/streamlit_app.py
 -----------------------
-Grant Prospecting Agent — Staff Portal
+Grant Prospecting — Staff Portal
 Built for Deborah's Place by AI for Good / P33 Chicago
+
+Integrates partner frontend (GrantScout AI design) with
+our backend agent engine, database, and learning loop.
 
 Run with: streamlit run portal/streamlit_app.py
 """
@@ -17,7 +20,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import csv
-from datetime import date
+import random
+import time
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 import streamlit as st
@@ -25,7 +30,7 @@ import streamlit as st
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Grant Prospecting — Deborah's Place",
-    page_icon="📋",
+    page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -33,53 +38,189 @@ st.set_page_config(
 # ── Styling ───────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
+    /* Sidebar */
     [data-testid="stSidebar"] { background-color: #1C3C64; }
-    [data-testid="stSidebar"] .stMarkdown p { color: white !important; }
+    [data-testid="stSidebar"] .stMarkdown p,
     [data-testid="stSidebar"] .stMarkdown h1,
     [data-testid="stSidebar"] .stMarkdown h2,
-    [data-testid="stSidebar"] .stMarkdown h3 { color: white !important; }
-    [data-testid="stSidebar"] small { color: rgba(255,255,255,0.7) !important; }
+    [data-testid="stSidebar"] .stMarkdown h3,
+    [data-testid="stSidebar"] small,
+    [data-testid="stSidebar"] .stCaption { color: white !important; }
+
+    /* Hide Streamlit chrome */
     #MainMenu { visibility: hidden; }
     footer    { visibility: hidden; }
     header    { visibility: hidden; }
+
+    /* Floating run button area */
+    .floating-bar {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        z-index: 9999;
+        display: flex;
+        gap: 8px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
+# ── Constants ─────────────────────────────────────────────────────────────────
+
+SORT_OPTIONS = [
+    "Match Score: High to Low",
+    "Match Score: Low to High",
+    "Deadline: Soonest First",
+    "Award Amount: Highest First",
+    "Award Amount: Lowest First",
+]
+
+PRESET_AREAS = [
+    "Permanent Supportive Housing", "Interim Housing", "Health & Wellness",
+    "Community Engagement", "Workforce Development", "Mental Health Services",
+    "Youth Services", "Education", "Women's Services", "Anti-Poverty",
+    "Legal Aid", "Substance Use Recovery", "Other",
+]
+
+LOCATIONS = [
+    "Chicago, IL (Cook County)", "Greater Chicago Metro",
+    "Illinois Statewide", "National", "Other",
+]
+
+HEARD_OPTIONS = [
+    "Website", "Email newsletter", "In-person or conference",
+    "Partner organization", "Social media", "Board referral", "Other",
+]
+
+SOURCE_OPTIONS = [
+    "Manual Entry", "Philanthropy News Digest", "Instrumentl",
+    "Grants.gov", "Zeffy", "Archival 990", "Other",
+]
+
+
 # ── Session state ─────────────────────────────────────────────────────────────
-defaults = {
-    "logged_in": False,
-    "user_email": "",
-    "user_role": "",
-    "user_name": "",
-    "current_page": "dashboard",
-    "agent_running": False,
-    "run_results": None,
-}
-for k, v in defaults.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
+
+def init_state():
+    defaults = {
+        "current_user":     None,
+        "page":             "dashboard",
+        "grants":           [],
+        "sort_by":          "Match Score: High to Low",
+        "selected_grant_id": None,
+        "show_alert_log":   False,
+        "unread_alerts":    0,
+        "alert_log":        [],
+        "run_results":      None,
+        "agent_running":    False,
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+    # Load real grants from CSV on first load
+    if not st.session_state.grants:
+        st.session_state.grants = _load_grants_from_csv()
 
 
-# ── Helper functions ──────────────────────────────────────────────────────────
+# ── Backend helpers ───────────────────────────────────────────────────────────
+
+def _load_grants_from_csv() -> list[dict]:
+    """Load real grant results from the outputs folder and convert to card format."""
+    try:
+        base_dir = ROOT / "outputs" / "deborahs_place"
+        if not base_dir.exists():
+            return []
+        csv_files = sorted(base_dir.rglob("grant_prospects_*.csv"), reverse=True)
+        if not csv_files:
+            return []
+
+        grants = []
+        with open(csv_files[0], "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for i, row in enumerate(reader):
+                score = _safe_float(row.get("Final Score", ""))
+                days  = _safe_int(row.get("Days Remaining", ""))
+                award_range = row.get("Award Range", "Not specified")
+                award_range = award_range.replace("`", "$")
+
+                # Determine temperature from days remaining
+                if days is not None and days <= 30:
+                    temp = "hot"
+                elif days is not None and days <= 60:
+                    temp = "warm"
+                else:
+                    temp = "less-warm"
+
+                grants.append({
+                    "id":           str(i + 1),
+                    "temperature":  temp,
+                    "source":       row.get("Data Source", "Agent"),
+                    "is_manually_added": False,
+                    "funding_org":  row.get("Funder Name", ""),
+                    "program_name": row.get("Program Name", ""),
+                    "program_contact": row.get("Program Officer", "Not listed"),
+                    "description":  row.get("Description", ""),
+                    "days_to_deadline": days or 999,
+                    "deadline":     row.get("Application Deadline", "Not listed"),
+                    "eligibility":  row.get("Eligibility Requirements", ""),
+                    "award_label":  award_range,
+                    "award_min":    _safe_int(row.get("Award Min", "")) or 0,
+                    "award_max":    _safe_int(row.get("Award Max", "")) or 0,
+                    "application_method": row.get("Application Method", ""),
+                    "application_url":    row.get("Application URL", ""),
+                    "disqualifying_restrictions": row.get("Disqualifying Factors", ""),
+                    "required_documents": [],
+                    "match_score":  score or 0.0,
+                    "retrieved_ago": row.get("Date Found", ""),
+                    "scoring": {
+                        "geographic_alignment": {
+                            "score": _safe_float(row.get("Score: Geographic Alignment", "")) or 0,
+                            "label": "Geographic Alignment",
+                            "explanation": row.get("Reason: Geographic", ""),
+                        },
+                        "population_served": {
+                            "score": _safe_float(row.get("Score: Population Alignment", "")) or 0,
+                            "label": "Population Served",
+                            "explanation": row.get("Reason: Population", ""),
+                        },
+                        "budget_fit": {
+                            "score": _safe_float(row.get("Score: Budget Fit", "")) or 0,
+                            "label": "Budget Fit",
+                            "explanation": row.get("Reason: Budget", ""),
+                            "is_highest_weight": True,
+                        },
+                        "timeline_feasibility": {
+                            "score": _safe_float(row.get("Score: Timeline Feasibility", "")) or 0,
+                            "label": "Timeline Feasibility",
+                            "explanation": row.get("Reason: Timeline", ""),
+                        },
+                    },
+                    "next_action":    row.get("Recommended Next Action", ""),
+                    "completeness":   row.get("Completeness Notes", ""),
+                    "is_prior_funder": "warm lead" in row.get("Prior Funder", "").lower(),
+                    "location":      row.get("Geographic Focus", "Chicago, IL"),
+                })
+        return grants
+    except Exception:
+        return []
+
 
 def check_login(email: str, password: str) -> Optional[dict]:
-    """Verify credentials and return user dict or None."""
+    """Verify credentials against real database."""
     try:
-        from sqlalchemy.orm import Session
         from database.db import SessionLocal
         from portal.models.user import User
         from portal.auth.security import verify_password
         db   = SessionLocal()
-        user = db.query(User).filter(
-            User.email == email.lower().strip()
-        ).first()
+        user = db.query(User).filter(User.email == email.lower().strip()).first()
         db.close()
         if user and verify_password(password, user.hashed_password) and user.is_active:
             return {
+                "id":        str(user.id),
+                "name":      user.full_name,
                 "email":     user.email,
-                "full_name": user.full_name,
                 "role":      user.role.value,
-                "org_name":  user.org_name,
+                "title":     "",
+                "organization": user.org_name,
             }
     except Exception as e:
         if "already defined" not in str(e):
@@ -87,401 +228,528 @@ def check_login(email: str, password: str) -> Optional[dict]:
     return None
 
 
-def load_results() -> list[dict]:
-    """Load most recent grant results from outputs folder."""
+def create_user_in_db(email: str, name: str, password: str, role: str) -> bool:
+    """Create a new user in the real database."""
     try:
-        base_dir = ROOT / "outputs" / "deborahs_place"
-        if not base_dir.exists():
-            return []
-        csv_files = sorted(
-            base_dir.rglob("grant_prospects_*.csv"), reverse=True
-        )
-        if not csv_files:
-            return []
-        results = []
-        with open(csv_files[0], "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                # Map display column names to internal field names
-                mapped = {
-                    "funder_name":              row.get("Funder Name", ""),
-                    "program_name":             row.get("Program Name", ""),
-                    "score_final":              row.get("Final Score", ""),
-                    "score_composite":          row.get("Composite Score", ""),
-                    "application_deadline":     row.get("Application Deadline", ""),
-                    "days_remaining":           row.get("Days Remaining", ""),
-                    "award_range":              row.get("Award Range", ""),
-                    "next_action":              row.get("Recommended Next Action", ""),
-                    "is_prior_funder":          row.get("Prior Funder", ""),
-                    "geographic_focus":         row.get("Geographic Focus", ""),
-                    "eligibility_requirements": row.get("Eligibility Requirements", ""),
-                    "application_url":          row.get("Application URL", ""),
-                    "score_geographic":         row.get("Score: Geographic Alignment", ""),
-                    "score_population":         row.get("Score: Population Alignment", ""),
-                    "score_budget":             row.get("Score: Budget Fit", ""),
-                    "score_timeline":           row.get("Score: Timeline Feasibility", ""),
-                    "reason_geographic":        row.get("Reason: Geographic", ""),
-                    "reason_population":        row.get("Reason: Population", ""),
-                    "reason_budget":            row.get("Reason: Budget", ""),
-                    "reason_timeline":          row.get("Reason: Timeline", ""),
-                    "completeness_notes":       row.get("Completeness Notes", ""),
-                    "source":                   row.get("Data Source", ""),
-                    "date_found":               row.get("Date Found", ""),
-                }
-                results.append(mapped)
-        return results
-    except Exception as e:
-        st.error(f"Error loading results: {e}")
+        from database.db import SessionLocal
+        from portal.models.user import User, UserRole
+        from portal.auth.security import hash_password
+        db       = SessionLocal()
+        existing = db.query(User).filter(User.email == email.lower()).first()
+        if existing:
+            db.close()
+            return False
+        db.add(User(
+            email=email.lower().strip(), full_name=name,
+            org_name="Deborah's Place",
+            hashed_password=hash_password(password),
+            role=UserRole(role), is_active=True, is_verified=True,
+        ))
+        db.commit()
+        db.close()
+        return True
+    except Exception:
+        return False
+
+
+def load_db_users() -> list[dict]:
+    """Load all users from the real database."""
+    try:
+        from database.db import SessionLocal
+        from portal.models.user import User
+        db    = SessionLocal()
+        users = db.query(User).filter(User.org_name == "Deborah's Place").all()
+        db.close()
+        return [
+            {
+                "id":           str(u.id),
+                "name":         u.full_name,
+                "email":        u.email,
+                "role":         u.role.value,
+                "status":       "approved" if u.is_active else "inactive",
+                "organization": u.org_name,
+                "title":        "",
+            }
+            for u in users
+        ]
+    except Exception:
         return []
 
 
-def get_urgency(days) -> str:
-    """Return urgency level based on days remaining."""
+def run_agent_search(max_queries: int = 5, custom_search: str = "") -> int:
+    """Run the real agent pipeline and return count of results found."""
     try:
-        d = int(float(str(days)))
-        if d <= 30:
-            return "hot"
-        if d <= 60:
-            return "warm"
-        return "cool"
-    except Exception:
-        return "cool"
+        from agent.profile import OrgProfile
+        from agent.loop import AgentLoop
+        from output.formatter import ResultFormatter
+        from output.exporter import ResultExporter
+
+        profile   = OrgProfile.from_json(ROOT / "profiles" / "deborah_place.json")
+        loop      = AgentLoop(profile)
+        formatter = ResultFormatter(profile)
+        exporter  = ResultExporter(profile)
+
+        results = loop.run(
+            max_queries=max_queries,
+            custom_queries=[custom_search] if custom_search else None,
+        )
+
+        if results:
+            formatted = formatter.format_all(results)
+            exporter.export_csv(formatted)
+            exporter.export_excel(formatted)
+            exporter.export_run_summary(formatted)
+
+        # Reload grants from new CSV
+        st.session_state.grants = _load_grants_from_csv()
+        return len(results)
+    except Exception as e:
+        st.error(f"Agent error: {e}")
+        return 0
 
 
-def to_float(val) -> Optional[float]:
-    """Safely convert to float."""
-    try:
-        return float(val)
-    except Exception:
-        return None
+# ── Utility helpers ───────────────────────────────────────────────────────────
 
+def _safe_float(val) -> Optional[float]:
+    try:    return float(val)
+    except: return None
 
-def safe_progress(val: float) -> float:
-    """Clamp progress value to valid range 0.0 to 1.0."""
-    return max(0.0, min(1.0, val))
+def _safe_int(val) -> Optional[int]:
+    try:    return int(float(str(val)))
+    except: return None
 
+def stars(score: float) -> str:
+    full = min(int(round(score)), 5)
+    return "★" * full + "☆" * (5 - full)
 
-def score_color(val) -> str:
-    """Return color string for a score value."""
-    s = to_float(val)
-    if s is None:
-        return "#888888"
-    if s >= 4.0:
-        return "#27ae60"
-    if s >= 2.5:
-        return "#d68910"
-    return "#c0392b"
+def temp_label(temp: str) -> str:
+    return {"hot": "🔴 Hot", "warm": "🟡 Warm", "less-warm": "⚪ Archival"}.get(temp, temp)
 
+def sort_grants(grants: list, sort_by: str) -> list:
+    key_map = {
+        "Match Score: High to Low":  (lambda g: g["match_score"], True),
+        "Match Score: Low to High":  (lambda g: g["match_score"], False),
+        "Deadline: Soonest First":   (lambda g: g["days_to_deadline"], False),
+        "Award Amount: Highest First": (lambda g: g["award_max"], True),
+        "Award Amount: Lowest First":  (lambda g: g["award_max"], False),
+    }
+    fn, rev = key_map.get(sort_by, (lambda g: g["match_score"], True))
+    return sorted(grants, key=fn, reverse=rev)
 
-def format_award(award: str) -> str:
-    """Format award range for safe Streamlit display."""
-    if not award or award in ["Not specified", "Amount not specified", ""]:
-        return "Amount not specified"
-    # Escape dollar signs for Streamlit markdown
-    # Streamlit interprets $ as LaTeX math — use unicode dollar sign instead
-    award = award.replace("$", "\\$")
-    return award
+def is_cold_lead(g: dict) -> bool:
+    if g.get("is_manually_added"):
+        return False
+    r = g.get("disqualifying_restrictions", "").lower()
+    m = g.get("application_method", "").lower()
+    return (
+        "unsolicited applications declined" in r
+        or "does not accept unsolicited" in r
+        or "by invitation only" in m
+    )
 
 
 # ── LOGIN PAGE ────────────────────────────────────────────────────────────────
 
-def render_login():
-    """Clean login page shown before authentication."""
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col2:
-        st.markdown("<br><br>", unsafe_allow_html=True)
-        st.markdown("## 📋 Grant Prospecting Portal")
-        st.markdown("**AI for Good — Deborah's Place**")
-        st.markdown("Find open, actionable grant opportunities — automatically.")
-        st.markdown("---")
+def show_login():
+    _, col, _ = st.columns([1, 2, 1])
+    with col:
+        st.markdown("## 🎯 Grant Prospecting")
+        st.caption("AI-Powered Grant Prospecting Agent — Deborah's Place")
+        st.divider()
 
-        with st.form("login_form"):
-            email = st.text_input(
-                "Email address",
-                placeholder="your@email.com"
-            )
-            password = st.text_input(
-                "Password",
-                type="password"
-            )
-            submitted = st.form_submit_button(
-                "Sign In",
-                use_container_width=True,
-                type="primary"
-            )
+        tab_in, tab_up = st.tabs(["Sign In", "Sign Up"])
 
-        if submitted:
-            if not email or not password:
-                st.error("Please enter your email and password.")
-            else:
-                with st.spinner("Signing in..."):
-                    user = check_login(email, password)
-                if user:
-                    st.session_state.logged_in = True
-                    st.session_state.user_email = user["email"]
-                    st.session_state.user_role = user["role"]
-                    st.session_state.user_name = user["full_name"]
-                    st.session_state.current_page = "dashboard"
-                    st.rerun()
+        with tab_in:
+            with st.form("signin"):
+                email    = st.text_input("Email", placeholder="you@organization.org")
+                password = st.text_input("Password", type="password", placeholder="••••••••")
+                go       = st.form_submit_button("Sign In", type="primary", use_container_width=True)
+
+            if go:
+                if not email or not password:
+                    st.error("Please enter your email and password.")
                 else:
-                    st.error("Incorrect email or password. Please try again.")
+                    user = check_login(email, password)
+                    if user:
+                        st.session_state.current_user = user
+                        st.session_state.page = "dashboard"
+                        st.rerun()
+                    else:
+                        st.error("Incorrect email or password. Please try again.")
 
-        st.caption("Need access? Contact your administrator.")
+            st.caption("Admin: **admin@deborahsplace.org**")
 
-
-# ── DASHBOARD PAGE ────────────────────────────────────────────────────────────
-
-def render_dashboard():
-    """Main dashboard showing ranked grant prospect cards."""
-
-    st.markdown("## 📊 Grant Prospects")
-    st.markdown(
-        "Ranked opportunities Deborah's Place can act on today. "
-        "Updated automatically every morning."
-    )
-
-    results = load_results()
-
-    if not results:
-        st.info(
-            "**No grant results yet.**\n\n"
-            "Click **▶️ Run Agent** in the sidebar to search for open grant "
-            "opportunities. The first run takes 1 to 3 minutes and will search "
-            "the web and grant databases for opportunities that match "
-            "Deborah's Place's mission, programs, and location."
-        )
-        st.markdown("---")
-        st.markdown("### How this tool works")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.markdown("**🔍 Step 1 — Run the Agent**")
-            st.write(
-                "Click Run Agent in the sidebar. The agent searches "
-                "the web, filters out grants that do not qualify, and "
-                "scores everything that passes."
+        with tab_up:
+            role_choice = st.selectbox(
+                "Signing up as",
+                ["Basic User — staff / development associate", "Admin — director / administrator"],
+                key="su_role",
             )
-        with col2:
-            st.markdown("**📊 Step 2 — Review Your Results**")
-            st.write(
-                "Come back to this dashboard. Each grant is shown as "
-                "a card with a score, deadline, award range, and a "
-                "plain English explanation of why it is a good fit."
-            )
-        with col3:
-            st.markdown("**✅ Step 3 — Take Action**")
-            st.write(
-                "Each card tells you exactly what to do next. "
-                "Click the Apply button to go directly to the "
-                "funder's application page."
-            )
-        return
+            is_admin = role_choice.startswith("Admin")
+            if not is_admin:
+                st.info("Basic User accounts require Admin approval before access is granted.")
 
-    # Summary metrics
-    hot_count  = sum(1 for r in results if get_urgency(r.get("days_remaining")) == "hot")
-    warm_count = sum(1 for r in results if get_urgency(r.get("days_remaining")) == "warm")
-    cool_count = sum(1 for r in results if get_urgency(r.get("days_remaining")) == "cool")
+            with st.form("signup"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    su_name  = st.text_input("Full Name *")
+                    su_email = st.text_input("Work Email *")
+                    su_pw    = st.text_input("Password *", type="password")
+                with c2:
+                    su_title = st.text_input("Job Title *")
+                    su_org   = st.text_input("Organization *")
+                    su_pw2   = st.text_input("Confirm Password *", type="password")
 
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("Total Opportunities", len(results))
-    with c2:
-        st.metric("🔴 Act Now", hot_count, help="Deadline within 30 days")
-    with c3:
-        st.metric("🟠 Coming Up", warm_count, help="Deadline in 31-60 days")
-    with c4:
-        st.metric("🔵 On Radar", cool_count, help="Deadline beyond 60 days")
+                submitted = st.form_submit_button(
+                    "Create Account" if is_admin else "Submit Request",
+                    type="primary", use_container_width=True,
+                )
 
-    st.markdown("---")
+            if submitted:
+                if not su_name or not su_email or not su_pw or not su_org:
+                    st.error("Please fill in all required fields.")
+                elif su_pw != su_pw2:
+                    st.error("Passwords do not match.")
+                elif len(su_pw) < 6:
+                    st.error("Password must be at least 6 characters.")
+                else:
+                    role = "admin" if is_admin else "user"
+                    ok   = create_user_in_db(su_email, su_name, su_pw, role)
+                    if ok:
+                        if is_admin:
+                            user = check_login(su_email, su_pw)
+                            if user:
+                                st.session_state.current_user = user
+                                st.session_state.page = "dashboard"
+                                st.rerun()
+                        else:
+                            st.success("✅ Request submitted. An admin will review and approve your access.")
+                    else:
+                        st.error("An account with that email already exists.")
 
-    # Score guide
-    with st.expander("📖 How are grants scored? Click to read the guide."):
-        st.markdown("""
-The agent scores each grant using AI across **four criteria** on a 1 to 5 scale.
-Budget fit counts **double** because it is the most important factor.
 
-| Score | What it means |
-|---|---|
-| 4.5 – 5.0 | Excellent match — apply immediately |
-| 3.5 – 4.4 | Strong match — high priority |
-| 2.5 – 3.4 | Good match — worth pursuing |
-| 1.5 – 2.4 | Partial match — review carefully before applying |
-| 1.0 – 1.4 | Weak match — low priority |
+# ── SIDEBAR ───────────────────────────────────────────────────────────────────
 
-**The four criteria:**
-- 📍 **Geographic Alignment** — does this grant specifically target Chicago?
-- 👥 **Population Alignment** — does it serve women experiencing homelessness?
-- 💰 **Budget Fit** *(counts double)* — does the award range match our grant request range?
-- 📅 **Timeline Feasibility** — is the deadline realistic for preparation?
-        """)
+def show_sidebar():
+    user = st.session_state.current_user
+    with st.sidebar:
+        st.markdown("## 🎯 Grant Prospecting")
+        st.caption("AI Prospecting Agent")
 
-    # Filter
-    filter_by = st.selectbox(
-        "Filter by urgency",
-        ["All opportunities", "🔴 Act Now (deadline within 30 days)",
-         "🟠 Coming Up (31 to 60 days)", "🔵 On Radar (60+ days)"]
-    )
-
-    filtered = results
-    if "Act Now" in filter_by:
-        filtered = [r for r in results if get_urgency(r.get("days_remaining")) == "hot"]
-    elif "Coming Up" in filter_by:
-        filtered = [r for r in results if get_urgency(r.get("days_remaining")) == "warm"]
-    elif "On Radar" in filter_by:
-        filtered = [r for r in results if get_urgency(r.get("days_remaining")) == "cool"]
-
-    st.markdown(f"**Showing {len(filtered)} of {len(results)} opportunities**")
-    st.markdown("---")
-
-    if not filtered:
-        st.info("No opportunities match this filter. Try a different urgency level.")
-        return
-
-    # Grant cards
-    for idx, r in enumerate(filtered):
-        u       = get_urgency(r.get("days_remaining"))
-        funder  = r.get("funder_name", "Unknown Funder")
-        program = r.get("program_name", "")
-        dead    = r.get("application_deadline", "Not listed")
-        days    = r.get("days_remaining", "")
-        award   = format_award(r.get("award_range", ""))
-        action  = r.get("next_action", "")
-        url     = r.get("application_url", "")
-        score   = r.get("score_final", "")
-        prior   = r.get("is_prior_funder", "")
-        elig    = r.get("eligibility_requirements", "")
-        notes   = r.get("completeness_notes", "")
-        geo_s   = r.get("score_geographic", "")
-        pop_s   = r.get("score_population", "")
-        bud_s   = r.get("score_budget", "")
-        tim_s   = r.get("score_timeline", "")
-        geo_r   = r.get("reason_geographic", "")
-        pop_r   = r.get("reason_population", "")
-        bud_r   = r.get("reason_budget", "")
-        tim_r   = r.get("reason_timeline", "")
-
-        # Urgency setup
-        urgency_labels = {
-            "hot":  "🔴 Act Now — deadline within 30 days",
-            "warm": "🟠 Coming Up — deadline in 31 to 60 days",
-            "cool": "🔵 On Radar — deadline beyond 60 days",
-        }
-        ulabel = urgency_labels.get(u, "🔵 On Radar")
-
-        # Score setup — cap at 5.0 for display, cap progress at 1.0
-        sf = to_float(score)
-        if sf is not None:
-            sf_display = min(sf, 5.0)  # display max 5.0
-        else:
-            sf_display = None
-        sc = score_color(score)
-        score_display = f"{sf:.2f} / 5.00" if sf else "Not scored"
-        score_pct = safe_progress((sf / 5.0)) if sf else 0.0
-        stars = "⭐" * min(round(sf), 5) if sf else ""
-
-        # Prior funder tag
-        prior_tag = " — ⭐ Prior Funder" if "warm lead" in str(prior).lower() else ""
-
-        # Days display
+        # Agent status
         try:
-            days_int = int(float(str(days)))
-            days_str = f"{days_int} days remaining"
+            from agent.profile import OrgProfile
+            from agent.state import AgentState
+            profile  = OrgProfile.from_json(ROOT / "profiles" / "deborah_place.json")
+            state    = AgentState(profile)
+            last_run = state.get_last_run()
+            if last_run:
+                ts = last_run.get("timestamp", "")[:10]
+                st.success(f"● Agent Active · Last run {ts}")
+            else:
+                st.info("● Agent ready · Never run")
         except Exception:
-            days_str = ""
+            st.info("● Agent ready")
 
-        # Render card
-        st.markdown(f"### {funder}{prior_tag}")
-        st.markdown(f"*{program}*")
-        st.markdown(f"**{ulabel}**")
+        st.divider()
 
-        col_left, col_right = st.columns([3, 1])
+        # Navigation
+        nav = [
+            ("🏠  Dashboard",             "dashboard"),
+            ("▶️  Run Agent",              "run_agent"),
+            ("➕  Add Grant Manually",     "add_grant"),
+            ("🏢  Organization Profile",   "profile"),
+        ]
+        if user.get("role") == "admin":
+            nav.append(("👥  User Management", "users"))
+            nav.append(("⚙️  Admin Settings",  "admin"))
 
-        with col_left:
-            st.markdown(f"**📅 Deadline:** {dead}" + (f" — {days_str}" if days_str else ""))
-            if award == "Amount not specified":
-                st.warning("💰 **Award amount unknown** — verify directly with the funder")
+        for label, pg in nav:
+            active = st.session_state.page == pg
+            if st.button(label, use_container_width=True,
+                         type="primary" if active else "secondary",
+                         key=f"nav_{pg}"):
+                st.session_state.page = pg
+                st.rerun()
+
+        st.divider()
+
+        # Alert log
+        unread     = st.session_state.unread_alerts
+        dot        = " 🔴" if unread > 0 else ""
+        alert_lbl  = f"📬  Alert Log ({len(st.session_state.alert_log)}){dot}"
+        if st.button(alert_lbl, use_container_width=True, key="nav_alerts"):
+            st.session_state.show_alert_log = not st.session_state.show_alert_log
+            st.session_state.unread_alerts  = 0
+            st.rerun()
+
+        st.divider()
+
+        # User info
+        role_icon = "👑" if user.get("role") == "admin" else "👤"
+        st.caption(f"**{role_icon} {user['name']}**")
+        st.caption(user["email"])
+        st.caption(f"Role: {user.get('role','').upper()}")
+
+        st.markdown(" ")
+        if st.button("🚪  Sign Out", use_container_width=True, key="signout"):
+            st.session_state.current_user = None
+            st.session_state.page = "dashboard"
+            st.rerun()
+
+
+# ── GRANT CARD ────────────────────────────────────────────────────────────────
+
+def show_grant_card(g: dict):
+    temp  = g["temperature"]
+    score = g["match_score"]
+    icon  = {"hot": "🔴", "warm": "🟡", "less-warm": "⚪"}.get(temp, "")
+    days  = g["days_to_deadline"]
+    dl_icon = "🔴" if days < 30 else "📅"
+
+    with st.container(border=True):
+        col_main, col_score = st.columns([4, 1])
+
+        with col_main:
+            badges = f"{icon} **{temp.upper()}**  ·  *{g['source']}*"
+            if g.get("is_manually_added"):
+                badges += "  ·  📝 Manually Added"
+            if g.get("is_prior_funder"):
+                badges += "  ·  ⭐ Prior Funder"
+            st.markdown(badges)
+            st.markdown(f"### {g['program_name']}")
+            st.caption(f"**{g['funding_org']}**")
+            st.write(g["description"] or "No description available.")
+
+            c1, c2 = st.columns(2)
+            with c1:
+                st.caption(f"{dl_icon} **{days} days** to deadline · {g['deadline']}")
+            with c2:
+                award = g["award_label"]
+                if award and "$" not in award and award not in ["Not specified", ""]:
+                    award = "$" + award
+                st.caption(f"💰 {award}")
+
+            if g.get("source") == "Archival 990":
+                st.warning("⚠️ Archival data — no active RFP. For cultivation planning only.")
+
+            if g.get("next_action"):
+                if temp == "hot":
+                    st.error(f"**Next Step:** {g['next_action']}")
+                elif temp == "warm":
+                    st.warning(f"**Next Step:** {g['next_action']}")
+                else:
+                    st.info(f"**Next Step:** {g['next_action']}")
+
+        with col_score:
+            st.metric("Match Score", f"{min(score, 5.0):.1f} / 5.0")
+            st.write(stars(score))
+            st.caption(f"Retrieved {g['retrieved_ago']}")
+            if st.button("View Details", key=f"view_{g['id']}", use_container_width=True):
+                st.session_state.selected_grant_id = g["id"]
+                st.rerun()
+
+
+# ── GRANT DETAIL ──────────────────────────────────────────────────────────────
+
+def show_grant_detail():
+    gid = st.session_state.get("selected_grant_id")
+    if not gid:
+        return
+    g = next((x for x in st.session_state.grants if x["id"] == gid), None)
+    if not g:
+        return
+
+    with st.container(border=True):
+        hcol, xcol = st.columns([5, 1])
+        with hcol:
+            st.markdown(f"## {g['program_name']}")
+            st.caption(f"**{g['funding_org']}** · {temp_label(g['temperature'])} · Source: {g['source']}")
+        with xcol:
+            if st.button("✕ Close", key="close_detail"):
+                st.session_state.selected_grant_id = None
+                st.rerun()
+
+        st.write(g["description"] or "No description available.")
+        st.divider()
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**Funding Organization**")
+            st.write(g["funding_org"])
+            st.markdown("**Program Contact**")
+            st.write(g.get("program_contact") or "Not listed")
+            st.markdown("**Deadline**")
+            st.write(f"{g['deadline']} ({g['days_to_deadline']} days)")
+        with c2:
+            st.markdown("**Award Range**")
+            st.write(g["award_label"])
+            st.markdown("**Application Method**")
+            st.write(g.get("application_method") or "Not specified")
+            st.markdown("**Eligibility**")
+            st.info(g.get("eligibility") or "Not specified")
+
+        if g.get("disqualifying_restrictions") and g["disqualifying_restrictions"] not in ["Not specified", ""]:
+            st.warning(f"⚠️ Restrictions: {g['disqualifying_restrictions']}")
+
+        if g.get("completeness") and g["completeness"] not in ["Complete", ""]:
+            st.warning(f"⚠️ Still needs research: {g['completeness']}")
+
+        st.divider()
+        st.markdown("**Match Score Breakdown**")
+        scoring = g.get("scoring", {})
+        cols    = st.columns(4)
+        for i, (_, val) in enumerate(scoring.items()):
+            with cols[i]:
+                lbl = val["label"]
+                if val.get("is_highest_weight"):
+                    lbl += " ⚖️"
+                sv = min(float(val["score"]), 5.0)
+                st.metric(lbl, f"{sv:.0f} / 5")
+                st.progress(min(sv / 5.0, 1.0))
+                if val.get("explanation"):
+                    st.caption(val["explanation"])
+
+        st.divider()
+        url = g.get("application_url", "")
+        if url and url not in ["#", "Not found", ""]:
+            st.link_button(
+                "🔗 Go to Application Page",
+                url, use_container_width=True, type="primary"
+            )
+        else:
+            st.info("Application URL not found — search the funder's website directly.")
+        st.divider()
+
+
+# ── DASHBOARD ─────────────────────────────────────────────────────────────────
+
+def show_dashboard():
+    st.markdown("# Grant Pipeline")
+    st.caption("Opportunities surfaced for **Deborah's Place**, ranked by fit.")
+
+    # Alert log panel
+    if st.session_state.show_alert_log:
+        with st.expander("📬 Alert Log", expanded=True):
+            col_h, col_x = st.columns([5, 1])
+            with col_h:
+                st.markdown(f"**{len(st.session_state.alert_log)} alerts**")
+            with col_x:
+                if st.button("Close", key="close_alerts"):
+                    st.session_state.show_alert_log = False
+                    st.rerun()
+            if st.session_state.alert_log:
+                for alert in st.session_state.alert_log:
+                    st.markdown(f"**{alert['grant_name']}**")
+                    st.caption(f"{alert['funding_org']} · {alert['sent_ago']}")
+                    st.divider()
             else:
-                st.markdown(f"**💰 Award Range:** {award}")
+                st.info("No alerts yet. Run the agent to start finding grants.")
 
-        with col_right:
-            st.markdown(f"**Score: {score_display}**")
-            if score_pct > 0:
-                st.progress(score_pct)
-            if stars:
-                st.markdown(stars)
+    # Grant detail panel
+    show_grant_detail()
 
-        # Next action
-        if action:
-            if u == "hot":
-                st.error(f"**What to do next:** {action}")
-            elif u == "warm":
-                st.warning(f"**What to do next:** {action}")
-            else:
-                st.info(f"**What to do next:** {action}")
+    # Controls row
+    cc1, cc2, cc3 = st.columns([3, 2, 1])
+    with cc1:
+        sort_by = st.selectbox(
+            "Sort", SORT_OPTIONS,
+            index=SORT_OPTIONS.index(st.session_state.sort_by),
+            label_visibility="collapsed", key="sort_sel"
+        )
+        st.session_state.sort_by = sort_by
+    with cc2:
+        st.caption(f"Last updated: {date.today().strftime('%B %d, %Y')}")
+    with cc3:
+        if st.button("➕ Add Grant", use_container_width=True):
+            st.session_state.page = "add_grant"
+            st.rerun()
 
-        # Full details expander
-        with st.expander("See full details — eligibility, scores, and apply link"):
+    # Partition grants
+    all_g    = st.session_state.grants
+    hot      = sort_grants([g for g in all_g if g["temperature"] == "hot"    and not is_cold_lead(g)], sort_by)
+    warm     = sort_grants([g for g in all_g if g["temperature"] == "warm"   and not is_cold_lead(g)], sort_by)
+    archival = sort_grants([g for g in all_g if g["temperature"] == "less-warm"], sort_by)
+    cold     = [g for g in all_g if is_cold_lead(g) and not g.get("is_manually_added")]
+    visible  = hot + warm
+    avg_score = sum(g["match_score"] for g in visible) / max(len(visible), 1)
 
-            if elig and elig not in ["Not specified", ""]:
-                st.markdown("**Eligibility Requirements:**")
-                st.write(elig)
-                st.markdown("---")
+    # Stats row
+    st.divider()
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("🔴 Hot Leads",       len(hot))
+    s2.metric("🟡 Warm Leads",      len(warm))
+    s3.metric("⚪ Archival Sources", len(archival))
+    s4.metric("📊 Avg Match Score", f"{avg_score:.1f}")
+    st.divider()
 
-            st.markdown("**Score Breakdown — why did it get this score?**")
+    # Run results message
+    if st.session_state.run_results is not None:
+        count = st.session_state.run_results
+        if count > 0:
+            st.success(
+                f"✅ Agent found **{count} grant {'opportunity' if count == 1 else 'opportunities'}** "
+                f"for Deborah's Place. Results are now in your pipeline below."
+            )
+        else:
+            st.info(
+                "✅ Agent run complete. No new opportunities matched Deborah's Place's "
+                "criteria this time. Try a deeper search or a specific funder name."
+            )
+        if st.button("Dismiss"):
+            st.session_state.run_results = None
+            st.rerun()
 
-            criteria = [
-                ("📍 Geographic Alignment", geo_s, geo_r),
-                ("👥 Population Alignment",  pop_s, pop_r),
-                ("💰 Budget Fit (counts double)", bud_s, bud_r),
-                ("📅 Timeline Feasibility",  tim_s, tim_r),
-            ]
+    # Tabs
+    tab_hot, tab_warm = st.tabs([
+        f"🔴 Act Now ({len(hot)})",
+        f"🟡 Coming Up ({len(warm)})"
+    ])
 
-            for label, s, reason in criteria:
-                sv = to_float(s)
-                if sv is not None:
-                    col_a, col_b = st.columns([1, 3])
-                    with col_a:
-                        st.markdown(f"**{sv:.0f} / 5**")
-                        st.markdown(f"{label}")
-                    with col_b:
-                        st.progress(safe_progress(sv / 5.0))
-                        if reason and reason not in ["Not available", ""]:
-                            st.caption(reason)
+    with tab_hot:
+        st.caption("Hot leads with imminent deadlines. Get these out the door first.")
+        if hot:
+            for g in hot:
+                show_grant_card(g)
+        else:
+            st.info("No hot leads right now. Click **▶️ Run Agent** in the sidebar to find new opportunities.")
 
-            if notes and notes not in ["Complete", ""]:
-                st.warning(f"⚠️ Still needs research before applying: {notes}")
+    with tab_warm:
+        st.caption("Warm leads queued for the next grant cycle.")
+        if warm:
+            for g in warm:
+                show_grant_card(g)
+        else:
+            st.info("No warm leads queued. Click **▶️ Run Agent** in the sidebar to surface upcoming opportunities.")
 
-            st.markdown("---")
+    # Archival section
+    st.divider()
+    with st.expander(f"⚪ Archival Sources — 990 Data  ({len(archival)} sources)", expanded=False):
+        st.caption("Historical giving patterns from IRS Form 990 filings. No active RFP confirmed. Use for cultivation planning.")
+        if archival:
+            for g in archival:
+                show_grant_card(g)
+        else:
+            st.info("No archival sources yet. Run a deep search to surface 990 data.")
 
-            if url and url not in ["Not found", ""]:
-                st.link_button(
-                    "🔗 Go to Application Page",
-                    url,
-                    use_container_width=True,
-                    type="primary"
-                )
-            else:
-                st.info(
-                    "Application URL was not found automatically. "
-                    "Search the funder's website directly to find the application page."
-                )
-
-        st.markdown("---")
+    if cold:
+        st.caption(
+            f"🙈 **{len(cold)} cold lead{'s' if len(cold) > 1 else ''} hidden** "
+            f"— require existing relationships or do not accept unsolicited applications."
+        )
 
 
 # ── RUN AGENT PAGE ────────────────────────────────────────────────────────────
 
-def render_run_agent():
-    """Run Agent page — trigger a new search."""
-
-    st.markdown("## ▶️ Run Grant Agent")
+def show_run_agent():
+    st.markdown("# ▶️ Run Grant Agent")
     st.markdown(
-        "Click the button below to search for new grant opportunities right now. "
-        "The agent will search the web and grant databases, filter out anything "
-        "that does not qualify, score each opportunity with AI, and update "
-        "your dashboard with everything it finds."
+        "The agent searches the web and grant databases, filters out anything "
+        "that does not qualify, scores each opportunity with AI, and updates "
+        "your pipeline with everything it finds."
     )
 
-    # Stats from last run
+    # Stats
     try:
         from agent.profile import OrgProfile
         from agent.state import AgentState
@@ -489,27 +757,24 @@ def render_run_agent():
         state    = AgentState(profile)
         last_run = state.get_last_run()
         stats    = state.get_stats()
-
         c1, c2, c3 = st.columns(3)
-        with c1:
-            st.metric("Total Runs Completed", stats.get("total_runs", 0))
-        with c2:
-            st.metric("Sources Being Monitored", stats.get("watch_list_size", 0))
+        with c1: st.metric("Total Runs Completed",   stats.get("total_runs", 0))
+        with c2: st.metric("Sources Being Monitored", stats.get("watch_list_size", 0))
         with c3:
             lr = last_run["timestamp"][:10] if last_run else "Never"
             st.metric("Last Run Date", lr)
     except Exception:
         pass
 
-    st.markdown("---")
+    st.divider()
     st.markdown("### Search Options")
 
     search_type = st.radio(
         "How thorough should this search be?",
         [
-            "Quick search — 5 queries, about 1 minute",
-            "Standard search — 10 queries, about 2 minutes",
-            "Deep search — 20 queries, about 4 minutes",
+            "Quick — 5 queries, about 1 minute",
+            "Standard — 10 queries, about 2 minutes",
+            "Deep — 20 queries, about 4 minutes",
             "Search for a specific funder by name",
         ]
     )
@@ -517,305 +782,288 @@ def render_run_agent():
     custom_search = ""
     if "specific funder" in search_type:
         custom_search = st.text_input(
-            "Enter the funder name to search for",
+            "Funder name",
             placeholder="e.g. Polk Bros Foundation open grants 2026"
         )
 
     query_map = {
-        "Quick search — 5 queries, about 1 minute": 5,
-        "Standard search — 10 queries, about 2 minutes": 10,
-        "Deep search — 20 queries, about 4 minutes": 20,
+        "Quick — 5 queries, about 1 minute":   5,
+        "Standard — 10 queries, about 2 minutes": 10,
+        "Deep — 20 queries, about 4 minutes":  20,
         "Search for a specific funder by name": 1,
     }
     max_q = query_map.get(search_type, 5)
+    st.divider()
 
-    st.markdown("---")
-
-    # Run button
     if st.session_state.agent_running:
         st.button("⏳ Agent is running...", disabled=True, use_container_width=True)
-        st.info("The agent is searching for grants right now. This takes 1 to 3 minutes. Please wait.")
+        st.info("Searching for open grants for Deborah's Place... this takes 1 to 3 minutes.")
     else:
         if st.button("▶️ Run Agent Now", type="primary", use_container_width=True):
             st.session_state.agent_running = True
-            with st.spinner(
-                "Searching for open grants for Deborah's Place... "
-                "checking foundation websites, grant databases, and the web..."
-            ):
-                try:
-                    from agent.profile import OrgProfile
-                    from agent.loop import AgentLoop
-                    from output.formatter import ResultFormatter
-                    from output.exporter import ResultExporter
+            with st.status("Running grant search...", expanded=True) as status:
+                st.write("🔵 Scanning sources: web, Grants.gov, 990 data...")
+                time.sleep(0.5)
+                st.write("🟣 Matching to Deborah's Place profile...")
+                count = run_agent_search(max_q, custom_search)
+                st.write("🟢 Scoring and ranking results...")
+                time.sleep(0.3)
+                st.write(f"✅ Done — {count} opportunities found.")
+                status.update(label="Grant search complete!", state="complete")
 
-                    profile   = OrgProfile.from_json(ROOT / "profiles" / "deborah_place.json")
-                    loop      = AgentLoop(profile)
-                    formatter = ResultFormatter(profile)
-                    exporter  = ResultExporter(profile)
-
-                    results = loop.run(
-                        max_queries=max_q,
-                        custom_queries=[custom_search] if custom_search else None,
-                    )
-
-                    if results:
-                        formatted = formatter.format_all(results)
-                        exporter.export_csv(formatted)
-                        exporter.export_excel(formatted)
-                        exporter.export_run_summary(formatted)
-
-                    st.session_state.run_results   = len(results)
-                    st.session_state.agent_running = False
-
-                except Exception as e:
-                    st.session_state.agent_running = False
-                    st.error(f"The agent encountered an error: {e}")
-                    st.session_state.run_results = None
-
+            alert = {
+                "grant_name":  f"Agent found {count} new lead{'s' if count != 1 else ''}",
+                "funding_org": "Run complete",
+                "sent_ago":    "just now",
+            }
+            st.session_state.alert_log.insert(0, alert)
+            st.session_state.unread_alerts  += 1
+            st.session_state.run_results     = count
+            st.session_state.agent_running   = False
             st.rerun()
 
-    # Results after run
     if st.session_state.run_results is not None:
         count = st.session_state.run_results
         if count > 0:
             st.success(
-                f"✅ **Run complete!**\n\n"
-                f"The agent found **{count} grant "
-                f"{'opportunity' if count == 1 else 'opportunities'}** "
-                f"for Deborah's Place.\n\n"
-                f"Click **📊 Dashboard** in the sidebar to see the full ranked list "
-                f"with scores, deadlines, and next steps for each one."
+                f"✅ **Done!** Found **{count} {'opportunity' if count == 1 else 'opportunities'}**. "
+                f"Go to **Dashboard** to see them."
             )
         else:
-            st.info(
-                "✅ **Run complete.**\n\n"
-                "No new opportunities were found matching Deborah's Place's "
-                "criteria in this search. This can happen when all results "
-                "were federal grants (which are filtered out) or when deadlines "
-                "fall outside the acceptable range.\n\n"
-                "Try a deeper search or search for a specific funder by name."
-            )
-
-        if st.button("Clear this message"):
+            st.info("✅ Run complete. No new opportunities found. Try a deeper search or specific funder name.")
+        if st.button("Clear"):
             st.session_state.run_results = None
             st.rerun()
 
 
-# ── MANUAL INPUT PAGE ─────────────────────────────────────────────────────────
+# ── ADD GRANT PAGE ────────────────────────────────────────────────────────────
 
-def render_manual_input():
-    """Submit a grant found by staff."""
-
-    st.markdown("## ✉️ Submit a Grant You Found")
-    st.markdown(
-        "Found a grant opportunity the agent did not surface? "
-        "Submit it here. The agent will score it against Deborah's Place's profile, "
-        "add it to your results, and learn from it so it finds similar "
-        "opportunities automatically in the future."
+def show_add_grant():
+    st.markdown("# ➕ Add Grant Manually")
+    st.caption(
+        "Useful for board referrals, network leads, or funders you track offline. "
+        "Manually added grants bypass cold-lead filtering."
     )
 
-    with st.form("manual_input_form"):
-
-        st.markdown("### How did you find this grant?")
-
-        how_heard = st.selectbox(
-            "How did you hear about this opportunity?",
-            ["Website", "Email newsletter", "In-person or conference",
-             "Partner organization shared it", "Social media", "Other"]
-        )
-
-        source_name = st.text_input(
-            "Name of the source",
-            placeholder="e.g. Philanthropy News Digest, MacArthur Foundation website"
-        )
-
-        st.markdown("---")
-        st.markdown("### Grant Details")
-
-        funder_name  = st.text_input(
-            "Funding organization (required)",
-            placeholder="e.g. Polk Bros. Foundation"
-        )
-        program_name = st.text_input(
-            "Grant program name (required)",
-            placeholder="e.g. Community Impact Grant 2026"
-        )
-
-        app_url = ""
-        if how_heard == "Website":
-            app_url = st.text_input(
-                "Application URL",
-                placeholder="https://www.foundationname.org/apply"
+    with st.form("add_grant_form"):
+        c1, c2 = st.columns(2)
+        with c1:
+            how_heard       = st.selectbox("How did you hear about this?", HEARD_OPTIONS)
+            funding_org     = st.text_input("Funding Organization *")
+            program_name    = st.text_input("Program / Grant Name *")
+            award_label     = st.text_input("Award Range *", placeholder="e.g. $50,000 – $150,000")
+            deadline_known  = st.checkbox("I know the deadline date")
+            deadline_val    = None
+            if deadline_known:
+                deadline_val = st.date_input("Deadline", min_value=date.today())
+            award_min       = st.number_input("Award Min ($)", min_value=0, value=0, step=5000)
+        with c2:
+            source          = st.selectbox("Source", SOURCE_OPTIONS)
+            application_method = st.text_input("Application Method", placeholder="e.g. Online portal")
+            program_contact = st.text_input("Program Contact")
+            award_max       = st.number_input("Award Max ($)", min_value=0, value=50000, step=5000)
+            temperature     = st.selectbox(
+                "Lead Temperature",
+                ["hot", "warm", "less-warm"],
+                format_func=lambda t: {"hot": "🔴 Hot", "warm": "🟡 Warm", "less-warm": "⚪ Archival"}.get(t, t)
             )
+            app_url         = ""
+            if how_heard == "Website":
+                app_url = st.text_input("Application URL", placeholder="https://...")
 
-        st.markdown("---")
-        st.markdown("### Award and Deadline")
+        description    = st.text_area("Description *", height=80)
+        eligibility    = st.text_area("Eligibility", height=60)
+        disqualifying  = st.text_area("Disqualifying Restrictions", height=60)
 
-        award_range = st.selectbox(
-            "Estimated award range",
-            [
-                "Not sure",
-                "Under $10,000",
-                "$10,000 to $25,000",
-                "$25,000 to $50,000",
-                "$50,000 to $100,000",
-                "$100,000 to $250,000",
-                "$250,000 to $500,000",
-                "Over $500,000",
-            ]
-        )
+        submitted = st.form_submit_button("Add Grant to Pipeline", type="primary")
 
-        deadline_known = st.checkbox("I know the application deadline date")
-        deadline_val   = None
-        if deadline_known:
-            deadline_val = st.date_input(
-                "Application deadline",
-                min_value=date.today()
-            )
+    if submitted:
+        if not funding_org or not program_name or not description or not award_label:
+            st.error("Please fill in all required fields.")
         else:
-            st.caption("Leave unchecked if the deadline is unknown or rolling.")
+            deadline_str = str(deadline_val) if deadline_val else "Unknown"
+            days_left    = (deadline_val - date.today()).days if deadline_val else 999
 
-        st.markdown("---")
-        st.markdown("### Additional Information")
+            st.session_state.grants.append({
+                "id":             f"m-{random.randint(1000, 9999)}",
+                "temperature":    temperature,
+                "source":         source,
+                "is_manually_added": True,
+                "funding_org":    funding_org,
+                "program_name":   program_name,
+                "program_contact": program_contact,
+                "description":    description,
+                "days_to_deadline": days_left,
+                "deadline":       deadline_str,
+                "eligibility":    eligibility,
+                "award_label":    award_label,
+                "award_min":      award_min,
+                "award_max":      award_max,
+                "application_method": application_method,
+                "application_url":    app_url,
+                "disqualifying_restrictions": disqualifying,
+                "required_documents": [],
+                "match_score":    3.5,
+                "retrieved_ago":  "just now",
+                "is_prior_funder": False,
+                "next_action":    "Review eligibility and prepare application materials.",
+                "completeness":   "Manually added — verify all fields.",
+                "scoring": {
+                    "geographic_alignment": {"score": 3, "label": "Geographic Alignment", "explanation": "Manually added — verify geographic eligibility.", "is_highest_weight": False},
+                    "population_served":    {"score": 3, "label": "Population Served",    "explanation": "Manually added — verify population fit.", "is_highest_weight": False},
+                    "budget_fit":           {"score": 3, "label": "Budget Fit",           "explanation": "Manually added — verify award range alignment.", "is_highest_weight": True},
+                    "timeline_feasibility": {"score": 3, "label": "Timeline Feasibility", "explanation": "Manually added — verify timeline feasibility.", "is_highest_weight": False},
+                },
+                "location": "Chicago, IL",
+            })
 
-        eligibility = st.text_area(
-            "Eligibility requirements if known",
-            height=80,
-            placeholder="e.g. Chicago nonprofits serving women experiencing homelessness"
-        )
+            # Also submit to learning loop
+            try:
+                from agent.profile import OrgProfile
+                from learning.feedback import FeedbackProcessor
+                profile   = OrgProfile.from_json(ROOT / "profiles" / "deborah_place.json")
+                processor = FeedbackProcessor(profile)
+                processor.submit(
+                    funder_name   = funding_org,
+                    program_name  = program_name,
+                    source_url    = app_url or f"Manual entry via {how_heard}",
+                    submitted_by  = st.session_state.current_user.get("name", "Staff"),
+                    deadline      = str(deadline_val) if deadline_val else None,
+                    eligibility   = eligibility or None,
+                    notes         = f"Heard via: {how_heard}. {description}",
+                )
+            except Exception:
+                pass
 
-        description = st.text_area(
-            "Description — what does this grant fund?",
-            height=80,
-            placeholder="Brief description of what this grant supports"
-        )
-
-        submitted_by = st.text_input(
-            "Your name",
-            value=st.session_state.user_name
-        )
-
-        submit_btn = st.form_submit_button(
-            "Submit and Score This Grant",
-            type="primary",
-            use_container_width=True
-        )
-
-    if submit_btn:
-        if not funder_name.strip() or not program_name.strip():
-            st.error("Please enter the funding organization name and grant program name.")
-        else:
-            with st.spinner("Submitting and scoring... about 30 seconds."):
-                try:
-                    from agent.profile import OrgProfile
-                    from learning.feedback import FeedbackProcessor
-
-                    profile   = OrgProfile.from_json(ROOT / "profiles" / "deborah_place.json")
-                    processor = FeedbackProcessor(profile)
-
-                    source_url = app_url if app_url else f"Submitted manually via {how_heard}"
-
-                    result = processor.submit(
-                        funder_name    = funder_name.strip(),
-                        program_name   = program_name.strip(),
-                        source_url     = source_url,
-                        submitted_by   = submitted_by,
-                        deadline       = str(deadline_val) if deadline_val else None,
-                        award_range    = award_range if award_range != "Not sure" else None,
-                        eligibility    = eligibility.strip() or None,
-                        notes          = f"Heard via: {how_heard} — {source_name}. {description}",
-                        funder_website = app_url or None,
-                    )
-
-                    if result["success"]:
-                        if result["already_found"]:
-                            st.info("✅ The agent had already found this opportunity. You can see it on your dashboard.")
-                        else:
-                            st.success(f"✅ **Submitted successfully!**\n\n{result['message']}")
-                            if result.get("learned"):
-                                st.info(f"**What the agent learned:**\n\n{result['learned']}")
-                    else:
-                        st.error(result["message"])
-
-                except Exception as e:
-                    st.error(f"Submission error: {e}")
+            st.success(f"✅ '{program_name}' added to your pipeline.")
+            st.session_state.page = "dashboard"
+            st.rerun()
 
 
-# ── ADMIN PAGE ────────────────────────────────────────────────────────────────
+# ── ORGANIZATION PROFILE ──────────────────────────────────────────────────────
 
-def render_admin():
-    """Admin page — users, watch list, learning log, settings."""
+def show_profile():
+    st.markdown("# 🏢 Organization Profile")
+    st.caption("This profile powers the AI matching engine. Keep it current for the best grant recommendations.")
 
-    if st.session_state.user_role != "admin":
-        st.error("Administrator access is required to view this page.")
+    try:
+        from agent.profile import OrgProfile
+        profile = OrgProfile.from_json(ROOT / "profiles" / "deborah_place.json")
+        org = {
+            "name":             profile.org_name,
+            "mission":          profile.mission_statement,
+            "funding_needs":    ", ".join(profile.mission_keywords[:5]),
+            "program_areas":    [p.value.replace("_", " ").title() for p in profile.program_areas],
+            "location_focus":   f"{profile.geography.city}, {profile.geography.state} ({profile.geography.county or 'Cook County'})",
+            "populations_served": ", ".join(p.value.replace("_", " ") for p in profile.populations_served),
+        }
+    except Exception:
+        org = {
+            "name": "Deborah's Place", "mission": "",
+            "funding_needs": "", "program_areas": [],
+            "location_focus": "Chicago, IL (Cook County)",
+            "populations_served": "",
+        }
+
+    is_admin = st.session_state.current_user.get("role") == "admin"
+
+    if not is_admin:
+        st.info("👤 You are viewing the organization profile. Only Admin users can edit it.")
+        st.markdown(f"**Organization:** {org['name']}")
+        st.markdown(f"**Mission:** {org['mission']}")
+        st.markdown(f"**Location:** {org['location_focus']}")
+        st.markdown(f"**Program Areas:** {', '.join(org['program_areas'])}")
+        st.markdown(f"**Populations Served:** {org['populations_served']}")
         return
 
-    st.markdown("## ⚙️ Admin Dashboard")
+    with st.form("profile_form"):
+        org_name    = st.text_input("Organization Name *", value=org["name"])
+        mission     = st.text_area("Mission Statement *", value=org["mission"], height=100)
+        funding_needs = st.text_area("Funding Needs / Keywords", value=org["funding_needs"], height=60)
 
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "👥 Users", "📡 Watch List", "🧠 Learning Log", "⚙️ Settings"
-    ])
+        st.markdown("**Program Areas**")
+        all_options    = PRESET_AREAS + [a for a in org["program_areas"] if a not in PRESET_AREAS]
+        selected_areas = st.multiselect("Program Areas", options=all_options, default=[a for a in org["program_areas"] if a in all_options], label_visibility="collapsed")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            loc_idx        = LOCATIONS.index(org["location_focus"]) if org["location_focus"] in LOCATIONS else 0
+            location_focus = st.selectbox("Geographic Focus *", LOCATIONS, index=loc_idx)
+        with c2:
+            populations    = st.text_area("Populations Served", value=org["populations_served"], height=80)
+
+        saved = st.form_submit_button("💾 Save Profile", type="primary")
+
+    if saved:
+        st.success("✅ Profile noted. To permanently update the matching engine edit `profiles/deborah_place.json` directly or contact your administrator.")
+
+
+# ── USER MANAGEMENT ───────────────────────────────────────────────────────────
+
+def show_users():
+    if st.session_state.current_user.get("role") != "admin":
+        st.error("🔒 User Management is restricted to Admin accounts.")
+        return
+
+    st.markdown("# 👥 User Management")
+    st.caption("Add and remove team members and assign roles.")
+
+    current_id = st.session_state.current_user["id"]
+    db_users   = load_db_users()
+
+    st.subheader(f"Active Team ({len(db_users)})")
+    for user in db_users:
+        with st.container(border=True):
+            c1, c2, c3 = st.columns([3, 2, 1])
+            with c1:
+                label = f"**{user['name']}**"
+                if user["id"] == current_id:
+                    label += "  *(You)*"
+                st.markdown(label)
+                st.caption(user["email"])
+            with c2:
+                role_tag = "👑 ADMIN" if user["role"] == "admin" else "👤 USER"
+                st.write(role_tag)
+                st.caption("Active" if user["status"] == "approved" else "Inactive")
+            with c3:
+                st.write("")
+
+    st.divider()
+    st.subheader("Create New User")
+    with st.form("add_user_form"):
+        au1, au2, au3 = st.columns([2, 2, 1])
+        with au1:
+            new_name  = st.text_input("Full Name")
+        with au2:
+            new_email = st.text_input("Email")
+        with au3:
+            new_role_label = st.selectbox("Role", ["Basic User", "Admin"])
+        new_pw = st.text_input("Temporary Password", type="password")
+        if st.form_submit_button("Add User", type="primary"):
+            if not new_name or not new_email or not new_pw:
+                st.error("Please fill in name, email, and password.")
+            else:
+                role = "admin" if new_role_label == "Admin" else "user"
+                ok   = create_user_in_db(new_email, new_name, new_pw, role)
+                if ok:
+                    st.success(f"✅ User {new_email} created.")
+                    st.rerun()
+                else:
+                    st.error(f"Email {new_email} is already registered.")
+
+
+# ── ADMIN SETTINGS ────────────────────────────────────────────────────────────
+
+def show_admin():
+    if st.session_state.current_user.get("role") != "admin":
+        st.error("Administrator access required.")
+        return
+
+    st.markdown("# ⚙️ Admin Settings")
+
+    tab1, tab2, tab3 = st.tabs(["📡 Watch List", "🧠 Learning Log", "📊 Agent Stats"])
 
     with tab1:
-        st.markdown("### User Accounts")
-        try:
-            from database.db import SessionLocal
-            from portal.models.user import User
-            db    = SessionLocal()
-            users = db.query(User).filter(User.org_name == "Deborah's Place").all()
-            db.close()
-            if users:
-                for u in users:
-                    c1, c2, c3 = st.columns([3, 1, 1])
-                    with c1:
-                        role_tag = "👑 ADMIN" if u.role.value == "admin" else "👤 USER"
-                        st.write(f"**{u.full_name}** {role_tag} — {u.email}")
-                    with c2:
-                        st.write("✅ Active" if u.is_active else "❌ Inactive")
-                    with c3:
-                        lr = u.last_login.strftime("%m/%d/%Y") if u.last_login else "Never"
-                        st.caption(f"Last login: {lr}")
-            else:
-                st.info("No users found.")
-        except Exception as e:
-            st.error(f"Could not load users: {e}")
-
-        st.markdown("---")
-        st.markdown("### Create a New User")
-        with st.form("create_user_form"):
-            new_email    = st.text_input("Email address")
-            new_name     = st.text_input("Full name")
-            new_password = st.text_input("Temporary password", type="password")
-            new_role     = st.selectbox("Role", ["user", "admin"])
-            create_btn   = st.form_submit_button("Create User", type="primary")
-
-        if create_btn:
-            if not new_email or not new_name or not new_password:
-                st.error("Please fill in all three fields.")
-            else:
-                try:
-                    from database.db import SessionLocal
-                    from portal.models.user import User, UserRole
-                    from portal.auth.security import hash_password
-                    db = SessionLocal()
-                    existing = db.query(User).filter(User.email == new_email.lower()).first()
-                    if existing:
-                        st.error(f"Email {new_email} is already registered.")
-                    else:
-                        db.add(User(
-                            email=new_email.lower().strip(), full_name=new_name,
-                            org_name="Deborah's Place",
-                            hashed_password=hash_password(new_password),
-                            role=UserRole(new_role), is_active=True, is_verified=True,
-                        ))
-                        db.commit()
-                        db.close()
-                        st.success(f"✅ User {new_email} created.")
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"Error: {e}")
-
-    with tab2:
         st.markdown("### Sources the Agent Monitors")
         try:
             from agent.profile import OrgProfile
@@ -823,11 +1071,11 @@ def render_admin():
             profile = OrgProfile.from_json(ROOT / "profiles" / "deborah_place.json")
             state   = AgentState(profile)
             sources = state.get_watch_list()
-            high   = [s for s in sources if s.get("priority") == "high"]
-            medium = [s for s in sources if s.get("priority") == "medium"]
-            other  = [s for s in sources if s.get("priority") not in ["high","medium"]]
+            high    = [s for s in sources if s.get("priority") == "high"]
+            medium  = [s for s in sources if s.get("priority") == "medium"]
+            other   = [s for s in sources if s.get("priority") not in ["high","medium"]]
             st.write(f"**{len(sources)} sources** — {len(high)} high, {len(medium)} medium priority")
-            st.markdown("---")
+            st.divider()
             for group_label, group in [("🔴 High Priority", high), ("🟠 Medium Priority", medium), ("🔵 Other", other)]:
                 if group:
                     st.markdown(f"**{group_label}**")
@@ -837,19 +1085,19 @@ def render_admin():
                             st.write(f"• **{s['name']}**")
                             st.caption(s["url"])
                         with c2:
-                            st.caption(f"By: {s.get('added_by','seed')}")
+                            st.caption(s.get("added_by","seed"))
         except Exception as e:
             st.error(f"Could not load watch list: {e}")
 
-        st.markdown("---")
-        st.markdown("### Add a New Source")
+        st.divider()
+        st.markdown("### Add New Source")
         with st.form("add_source_form"):
-            src_name = st.text_input("Foundation name")
-            src_url  = st.text_input("URL", placeholder="https://www.foundation.org/grants")
-            src_pri  = st.selectbox("Priority", ["high", "medium", "low"])
-            add_btn  = st.form_submit_button("Add to Watch List", type="primary")
-        if add_btn:
-            if not src_name or not src_url:
+            sn  = st.text_input("Foundation name")
+            su  = st.text_input("URL", placeholder="https://www.foundation.org/grants")
+            sp  = st.selectbox("Priority", ["high", "medium", "low"])
+            ab  = st.form_submit_button("Add to Watch List", type="primary")
+        if ab:
+            if not sn or not su:
                 st.error("Name and URL required.")
             else:
                 try:
@@ -857,16 +1105,18 @@ def render_admin():
                     from agent.state import AgentState
                     profile = OrgProfile.from_json(ROOT / "profiles" / "deborah_place.json")
                     state   = AgentState(profile)
-                    added   = state.add_to_watch_list(name=src_name, url=src_url, priority=src_pri,
-                                added_by=f"admin:{st.session_state.user_email}")
+                    added   = state.add_to_watch_list(
+                        name=sn, url=su, priority=sp,
+                        added_by=f"admin:{st.session_state.current_user['email']}"
+                    )
                     state.save()
-                    st.success(f"✅ Added {src_name}." if added else f"{src_name} already in list.")
+                    st.success(f"✅ Added {sn}." if added else f"{sn} already in list.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {e}")
 
-    with tab3:
-        st.markdown("### What the Agent Has Learned")
+    with tab2:
+        st.markdown("### Learning Log")
         try:
             from agent.profile import OrgProfile
             from learning.learning_log import LearningLog
@@ -875,28 +1125,25 @@ def render_admin():
             stats   = log.get_stats()
             entries = log.get_recent_changes(limit=20)
             c1, c2, c3 = st.columns(3)
-            with c1: st.metric("Submissions", stats.get("submissions", 0))
+            with c1: st.metric("Submissions",   stats.get("submissions", 0))
             with c2: st.metric("Agent Updates", stats.get("changes", 0))
             with c3: st.metric("Sources Added", stats.get("sources_added", 0))
-            st.markdown("---")
-            if entries:
-                for entry in entries[:10]:
-                    t  = entry.get("timestamp","")[:10]
-                    et = entry.get("entry_type","")
-                    if et == "submission":
-                        sub = entry.get("submission", {})
-                        st.info(f"📥 **{t}** — {sub.get('funder_name','?')} — {sub.get('program_name','')}")
-                        if entry.get("learned"):
-                            st.caption(entry["learned"][:200])
-                    elif et == "change":
-                        st.success(f"🔧 **{t}** — {entry.get('description','')[:150]}")
-            else:
-                st.info("No learning log entries yet.")
+            st.divider()
+            for entry in entries[:10]:
+                t  = entry.get("timestamp","")[:10]
+                et = entry.get("entry_type","")
+                if et == "submission":
+                    sub = entry.get("submission", {})
+                    st.info(f"📥 **{t}** — {sub.get('funder_name','?')} — {sub.get('program_name','')}")
+                    if entry.get("learned"):
+                        st.caption(entry["learned"][:200])
+                elif et == "change":
+                    st.success(f"🔧 **{t}** — {entry.get('description','')[:150]}")
         except Exception as e:
             st.error(f"Could not load learning log: {e}")
 
-    with tab4:
-        st.markdown("### Current Agent Settings")
+    with tab3:
+        st.markdown("### Current Agent Configuration")
         try:
             from agent.profile import OrgProfile
             profile = OrgProfile.from_json(ROOT / "profiles" / "deborah_place.json")
@@ -906,9 +1153,8 @@ def render_admin():
 | Organization | {profile.org_name} |
 | Location | {profile.geography.city}, {profile.geography.state} |
 | Grant range | ${profile.budget.request_floor:,} – ${profile.budget.request_ceiling:,} |
-| Federal grants excluded | {"✅ Yes" if profile.settings.exclude_federal else "❌ No"} |
+| Federal excluded | {"✅ Yes" if profile.settings.exclude_federal else "❌ No"} |
 | Min days until deadline | {profile.settings.deadline_floor_days} days |
-| Max days until deadline | {profile.settings.deadline_ceiling_days} days |
 | Min score to show | {profile.settings.min_composite_score} / 5.0 |
 | Active programs | {len(profile.program_areas)} |
 | Known funders | {len(profile.known_funders)} |
@@ -920,86 +1166,32 @@ def render_admin():
             st.error(f"Could not load settings: {e}")
 
 
-# ── SIDEBAR ───────────────────────────────────────────────────────────────────
-
-def render_sidebar():
-    """Sidebar navigation with user info and logout."""
-    with st.sidebar:
-        st.markdown("##### MENU")
-        st.markdown("### 📋 Grant Prospecting")
-        st.caption("AI for Good — Deborah's Place")
-        st.markdown("---")
-
-        if st.session_state.logged_in:
-            role_icon = "👑" if st.session_state.user_role == "admin" else "👤"
-            st.markdown(f"**{role_icon} {st.session_state.user_name}**")
-            st.caption(st.session_state.user_email)
-            st.caption(f"Signed in as: {st.session_state.user_role.upper()}")
-            st.markdown("---")
-
-        nav_pages = [
-            ("📊 Dashboard",      "dashboard"),
-            ("▶️ Run Agent",       "run_agent"),
-            ("✉️ Submit a Grant",  "manual_input"),
-        ]
-        if st.session_state.user_role == "admin":
-            nav_pages.append(("⚙️ Admin", "admin"))
-
-        for label, key in nav_pages:
-            is_active = st.session_state.current_page == key
-            if st.button(label, key=f"nav_{key}", use_container_width=True,
-                         type="primary" if is_active else "secondary"):
-                st.session_state.current_page = key
-                st.rerun()
-
-        st.markdown("---")
-        results = load_results()
-        if results:
-            try:
-                base_dir  = ROOT / "outputs" / "deborahs_place"
-                csv_files = sorted(base_dir.rglob("grant_prospects_*.csv"), reverse=True)
-                if csv_files:
-                    with open(csv_files[0], "r") as f:
-                        csv_data = f.read()
-                    st.download_button(
-                        label="⬇️ Download Results (CSV)",
-                        data=csv_data,
-                        file_name=f"grant_prospects_{date.today()}.csv",
-                        mime="text/csv",
-                        use_container_width=True,
-                    )
-            except Exception:
-                pass
-
-        st.markdown("---")
-        st.markdown(" ")
-        if st.button("🚪 Sign Out", use_container_width=True):
-            for key in list(defaults.keys()):
-                st.session_state[key] = defaults[key]
-            st.rerun()
-
-
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 
 def main():
-    if not st.session_state.logged_in:
-        render_login()
+    init_state()
+
+    if not st.session_state.current_user:
+        show_login()
         return
 
-    render_sidebar()
+    show_sidebar()
 
-    page = st.session_state.current_page
+    page = st.session_state.page
     if page == "dashboard":
-        render_dashboard()
+        show_dashboard()
     elif page == "run_agent":
-        render_run_agent()
-    elif page == "manual_input":
-        render_manual_input()
+        show_run_agent()
+    elif page == "add_grant":
+        show_add_grant()
+    elif page == "profile":
+        show_profile()
+    elif page == "users":
+        show_users()
     elif page == "admin":
-        render_admin()
+        show_admin()
     else:
-        render_dashboard()
+        show_dashboard()
 
 
-if __name__ == "__main__":
-    main()
+main()

@@ -1,0 +1,636 @@
+{% extends "base.html" %}
+{% block title %}Grant Pipeline — GrantScout AI{% endblock %}
+
+{% block content %}
+
+<!-- Page Header -->
+<div class="page-header">
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="page-title">Grant Pipeline</h1>
+      <p class="page-subtitle">Opportunities surfaced for Deborah's Place, ranked by fit.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Stat Cards -->
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-icon-wrap red">🔥</div>
+    <div class="stat-info">
+      <div class="stat-value">{{ stats.hot_leads }}</div>
+      <div class="stat-label">Hot Leads</div>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon-wrap amber">☀️</div>
+    <div class="stat-info">
+      <div class="stat-value">{{ stats.warm_leads }}</div>
+      <div class="stat-label">Warm Leads</div>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon-wrap gray">🗄️</div>
+    <div class="stat-info">
+      <div class="stat-value">{{ stats.archival }}</div>
+      <div class="stat-label">Archival Sources</div>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon-wrap blue">📈</div>
+    <div class="stat-info">
+      <div class="stat-value">{{ stats.avg_score }}</div>
+      <div class="stat-label">Avg Match Score</div>
+    </div>
+  </div>
+</div>
+
+<!-- Controls Row -->
+<div class="controls-row">
+  <select class="sort-select" id="sortSelect" onchange="sortGrants(this.value)">
+    <option value="score">Sort: Match Score</option>
+    <option value="deadline">Sort: Deadline</option>
+    <option value="award">Sort: Award Amount</option>
+    <option value="funder">Sort: Funder Name</option>
+  </select>
+
+  <button class="btn btn-secondary" onclick="runSearch990()">
+    🗄️ Search Archival (990)
+  </button>
+
+  <div class="controls-spacer"></div>
+
+  <button class="btn btn-secondary" onclick="window.location='{{ url_for('grants.add') }}'">
+    + Add Grant
+  </button>
+
+  <button class="btn btn-primary" id="runAgentBtn" onclick="openRunAgentModal()">
+    ▶ Run Grant Search
+  </button>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <button class="tab-btn active" id="tabActNow" onclick="switchTab('act_now')">
+    Act Now <span class="tab-count" id="countActNow">{{ act_now_grants|length }}</span>
+  </button>
+  <button class="tab-btn" id="tabComingUp" onclick="switchTab('coming_up')">
+    Coming Up <span class="tab-count" id="countComingUp">{{ coming_up_grants|length }}</span>
+  </button>
+</div>
+
+<!-- ── ACT NOW TAB ──────────────────────────────────────── -->
+<div class="tab-panel active" id="panelActNow">
+  <p class="tab-caption">
+    Deadlines within 30 days — apply immediately.
+  </p>
+
+  <div class="grant-list" id="listActNow">
+    {% if act_now_grants %}
+      {% for grant in act_now_grants %}
+        {{ render_grant_card(grant) }}
+      {% endfor %}
+    {% else %}
+      <div class="empty-state">
+        <div class="empty-state-icon">🔥</div>
+        <div class="empty-state-title">No urgent deadlines right now</div>
+        <div class="empty-state-text">
+          Grants with deadlines in the next 30 days will appear here.
+          Run a grant search to find new opportunities.
+        </div>
+        <button class="btn btn-primary" onclick="openRunAgentModal()">
+          ▶ Run Grant Search
+        </button>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ── COMING UP TAB ────────────────────────────────────── -->
+<div class="tab-panel" id="panelComingUp">
+  <p class="tab-caption">
+    Deadlines 31–60 days out — start preparing your applications.
+  </p>
+
+  <div class="grant-list" id="listComingUp">
+    {% if coming_up_grants %}
+      {% for grant in coming_up_grants %}
+        {{ render_grant_card(grant) }}
+      {% endfor %}
+    {% else %}
+      <div class="empty-state">
+        <div class="empty-state-icon">☀️</div>
+        <div class="empty-state-title">No upcoming deadlines</div>
+        <div class="empty-state-text">
+          Grants with deadlines 31–60 days out will appear here.
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ── ARCHIVAL SECTION ──────────────────────────────────── -->
+{% if archival_grants %}
+<div class="archival-section">
+  <button class="archival-toggle" id="archivalToggle" onclick="toggleArchival()">
+    🗄️ &nbsp; Archival Sources
+    <span class="tab-count" style="margin-left: 6px;">{{ archival_grants|length }}</span>
+    <svg class="chevron" viewBox="0 0 24 24" width="14" height="14" fill="none"
+         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="6 9 12 15 18 9"/>
+    </svg>
+  </button>
+  <div class="archival-body" id="archivalBody">
+    <div class="grant-list">
+      {% for grant in archival_grants %}
+        {{ render_grant_card(grant) }}
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Cold leads notice -->
+{% if cold_leads_count and cold_leads_count > 0 %}
+<div class="cold-leads-notice">
+  🧊 {{ cold_leads_count }} cold lead{{ 's' if cold_leads_count != 1 else '' }} hidden
+  (invitation-only or unsolicited applications declined)
+</div>
+{% endif %}
+
+<!-- ── DETAIL PANEL ──────────────────────────────────────── -->
+<div class="overlay-backdrop" id="detailBackdrop" onclick="closeDetailPanel()"></div>
+<div class="detail-panel" id="detailPanel">
+
+  <div class="detail-panel-header">
+    <div class="detail-panel-toprow">
+      <span class="badge" id="dpTempBadge"></span>
+      <span class="badge badge-source" id="dpSourceBadge"></span>
+      <span style="font-size:11.5px; color: var(--text-faint); margin-left: 4px;" id="dpRetrieved"></span>
+      <button class="detail-close" onclick="closeDetailPanel()">✕</button>
+    </div>
+    <h2 class="detail-program-name" id="dpProgramName"></h2>
+    <div class="detail-funder" id="dpFunder"></div>
+    <p class="detail-description" id="dpDescription"></p>
+  </div>
+
+  <div class="detail-panel-body">
+
+    <!-- THE WHO -->
+    <div class="detail-section-label">THE WHO</div>
+    <div class="detail-row">
+      <span class="detail-row-label">Funding Organization</span>
+      <span class="detail-row-value" id="dpFundingOrg"></span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-row-label">Program Contact</span>
+      <span class="detail-row-value" id="dpContact"></span>
+    </div>
+
+    <hr class="detail-divider" />
+
+    <!-- THE HOW -->
+    <div class="detail-section-label">THE HOW</div>
+    <div class="detail-row">
+      <span class="detail-row-label">Deadline</span>
+      <span class="detail-row-value" id="dpDeadline"></span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-row-label">Eligibility</span>
+      <span class="detail-row-value">
+        <div class="detail-eligibility-box" id="dpEligibility"></div>
+      </span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-row-label">Award Range</span>
+      <span class="detail-row-value" id="dpAwardRange"></span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-row-label">Application Method</span>
+      <span class="detail-row-value" id="dpAppMethod"></span>
+    </div>
+    <div class="detail-row" id="dpDisqualifyRow">
+      <span class="detail-row-label">Restrictions</span>
+      <span class="detail-row-value detail-disqualify" id="dpDisqualify"></span>
+    </div>
+
+    <hr class="detail-divider" />
+
+    <!-- Required Documents -->
+    <div class="detail-section-label">REQUIRED DOCUMENTS</div>
+    <ul class="detail-docs-list" id="dpDocsList">
+      <li>See application guidelines</li>
+    </ul>
+
+    <hr class="detail-divider" />
+
+    <!-- Open Application Button -->
+    <a href="#" id="dpAppLink" target="_blank" rel="noopener noreferrer"
+       class="btn btn-primary btn-full btn-lg">
+      Open Application ↗
+    </a>
+
+    <hr class="detail-divider" />
+
+    <!-- Scoring Matrix -->
+    <div style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 8px;">
+      Scoring Matrix
+    </div>
+    <div class="score-summary">
+      <span class="score-big" id="dpOverallScore">—</span>
+      <span class="score-big-denom">/5</span>
+    </div>
+
+    <div class="score-cards" id="dpScoreCards">
+      <!-- Populated by JS -->
+    </div>
+
+  </div>
+</div>
+
+<!-- ── RUN AGENT MODAL ───────────────────────────────────── -->
+<div class="run-agent-modal" id="runAgentModal">
+  <div class="run-agent-card">
+    <div style="font-size: 28px; margin-bottom: 12px;">🔍</div>
+    <div class="run-agent-title">Running Grant Search</div>
+    <div class="run-agent-subtitle" id="agentStatusText">
+      Initializing agent…
+    </div>
+    <div class="progress-bar-wrap" style="margin: 16px 0 8px;">
+      <div class="progress-bar-fill" id="agentProgressBar"></div>
+    </div>
+    <div style="font-size: 11.5px; color: var(--text-faint); margin-bottom: 10px;" id="agentProgressLabel">
+      0%
+    </div>
+    <div class="progress-log" id="agentLog"></div>
+    <button class="btn btn-secondary btn-sm" style="margin-top: 14px;" id="agentCancelBtn"
+            onclick="closeRunAgentModal()">
+      Cancel
+    </button>
+  </div>
+</div>
+
+{% endblock %}
+
+<!-- ── Grant Card Macro ──────────────────────────────────── -->
+{% macro render_grant_card(grant) %}
+{% set days = grant['Days Remaining'] | int(default=999) %}
+{% set score = [grant['Final Score'] | float(default=0), 5.0] | min %}
+{% set filled = (score | round | int) %}
+{% set temp = 'hot' if days <= 30 else ('warm' if days <= 60 else 'archival') %}
+{% set is_manual = grant.get('Data Source', '') == 'Manual' %}
+
+<div class="grant-card {{ temp }}"
+     data-grant='{{ grant | tojson }}'
+     data-days="{{ days }}"
+     data-score="{{ score }}"
+     data-funder="{{ grant['Funder Name'] | e }}">
+
+  <div class="grant-card-body">
+    <!-- Badge row -->
+    <div class="badge-row">
+      {% if temp == 'hot' %}
+        <span class="badge badge-hot">🔥 Hot</span>
+      {% elif temp == 'warm' %}
+        <span class="badge badge-warm">☀️ Warm</span>
+      {% else %}
+        <span class="badge badge-archival">🗄️ Less Warm</span>
+      {% endif %}
+
+      <span class="badge badge-source">
+        {{ grant.get('Data Source', 'Web') | replace('Tool','') | replace('Search','Search') }}
+      </span>
+
+      {% if is_manual %}
+        <span class="badge badge-manual">✚ Manually Added</span>
+      {% endif %}
+    </div>
+
+    <!-- Funder + Program -->
+    <div class="grant-funder">{{ grant['Funder Name'] }}</div>
+    <div class="grant-name">{{ grant['Program Name'] }}</div>
+    <p class="grant-description">{{ grant.get('Description', '') }}</p>
+
+    <!-- Meta row -->
+    <div class="grant-meta-row">
+      <div class="grant-meta-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+          <line x1="16" y1="2" x2="16" y2="6"/>
+          <line x1="8"  y1="2" x2="8"  y2="6"/>
+          <line x1="3"  y1="10" x2="21" y2="10"/>
+        </svg>
+        <span class="{% if temp == 'hot' %}deadline-hot{% elif temp == 'warm' %}deadline-warm{% endif %}">
+          {{ days }} days
+        </span>
+        &nbsp;·&nbsp; {{ grant.get('Application Deadline', 'Unknown') }}
+      </div>
+
+      {% set award = grant.get('Award Range', '') | replace('`','$') | replace('$$','$') %}
+      {% if award %}
+      <div class="grant-meta-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="1"  x2="12" y2="23"/>
+          <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+        </svg>
+        <span class="award-amount">{{ award }}</span>
+      </div>
+      {% endif %}
+    </div>
+
+    {% if grant.get('Prior Funder', '') == 'Yes — warm lead' %}
+    <div class="archival-warning">
+      ⚠️ Prior funder — warm relationship
+    </div>
+    {% endif %}
+
+  </div>
+
+  <!-- Side panel -->
+  <div class="grant-card-side">
+    <div class="stars">
+      {% for i in range(1, 6) %}
+        <span class="star {% if i <= filled %}filled{% endif %}">★</span>
+      {% endfor %}
+    </div>
+    <div>
+      <span class="score-number">{{ "%.1f" | format(score) }}</span>
+      <span class="score-denom">/5</span>
+    </div>
+    <div class="score-label">Match score</div>
+    <div class="retrieved-label">
+      Found {{ grant.get('Date Found', '') }}
+    </div>
+    <button class="view-details-btn" onclick="openDetailPanel(this.closest('.grant-card'))">
+      View details →
+    </button>
+  </div>
+
+</div>
+{% endmacro %}
+
+{% block scripts %}
+<script>
+  // ── Tab switching ──────────────────────────────────────
+  function switchTab(tab) {
+    document.getElementById('tabActNow').classList.toggle('active', tab === 'act_now');
+    document.getElementById('tabComingUp').classList.toggle('active', tab === 'coming_up');
+    document.getElementById('panelActNow').classList.toggle('active', tab === 'act_now');
+    document.getElementById('panelComingUp').classList.toggle('active', tab === 'coming_up');
+  }
+
+  // ── Archival toggle ────────────────────────────────────
+  function toggleArchival() {
+    var toggle = document.getElementById('archivalToggle');
+    var body   = document.getElementById('archivalBody');
+    toggle.classList.toggle('open');
+    body.classList.toggle('open');
+  }
+
+  // ── Detail panel ───────────────────────────────────────
+  function openDetailPanel(card) {
+    var raw = card.getAttribute('data-grant');
+    var g;
+    try { g = JSON.parse(raw); } catch(e) { return; }
+
+    var days  = parseInt(card.getAttribute('data-days'), 10) || 999;
+    var score = parseFloat(card.getAttribute('data-score')) || 0;
+    var temp  = days <= 30 ? 'hot' : (days <= 60 ? 'warm' : 'archival');
+
+    // Temperature badge
+    var tempBadge = document.getElementById('dpTempBadge');
+    if (temp === 'hot') {
+      tempBadge.className = 'badge badge-hot';
+      tempBadge.textContent = '🔥 Hot Lead';
+    } else if (temp === 'warm') {
+      tempBadge.className = 'badge badge-warm';
+      tempBadge.textContent = '☀️ Warm Lead';
+    } else {
+      tempBadge.className = 'badge badge-archival';
+      tempBadge.textContent = '🗄️ Less Warm';
+    }
+
+    // Source badge
+    var src = (g['Data Source'] || 'Web').replace('Tool','').replace('Search','Search');
+    document.getElementById('dpSourceBadge').textContent = src;
+    document.getElementById('dpRetrieved').textContent   = 'Found ' + (g['Date Found'] || '');
+
+    // Header
+    document.getElementById('dpProgramName').textContent = g['Program Name'] || '';
+    document.getElementById('dpFunder').textContent      = g['Funder Name']  || '';
+    document.getElementById('dpDescription').textContent = g['Description']  || '';
+
+    // THE WHO
+    document.getElementById('dpFundingOrg').textContent = g['Funder Name'] || '—';
+    document.getElementById('dpContact').textContent    = g['Program Officer'] || 'Not listed';
+
+    // THE HOW
+    var deadlineEl = document.getElementById('dpDeadline');
+    var daysClass  = days <= 30 ? 'days-hot' : (days <= 60 ? 'days-warm' : '');
+    deadlineEl.innerHTML =
+      (g['Application Deadline'] || 'Unknown') +
+      ' <span class="' + daysClass + '">(' + days + ' days remaining)</span>';
+
+    document.getElementById('dpEligibility').textContent =
+      g['Eligibility Requirements'] || 'See application guidelines.';
+
+    var award = (g['Award Range'] || '').replace(/`/g, '$').replace(/\$\$/g, '$');
+    document.getElementById('dpAwardRange').textContent = award || '—';
+
+    // Application method — make link if URL
+    var appMethodEl = document.getElementById('dpAppMethod');
+    var method = g['Application Method'] || '—';
+    if (method.startsWith('http')) {
+      appMethodEl.innerHTML = '<a href="' + method + '" target="_blank">' + method + '</a>';
+    } else {
+      appMethodEl.textContent = method;
+    }
+
+    // Disqualifying restrictions
+    var dq = g['Disqualifying Factors'] || '';
+    var dqRow = document.getElementById('dpDisqualifyRow');
+    if (dq && dq.trim() && dq.toLowerCase() !== 'none') {
+      document.getElementById('dpDisqualify').textContent = dq;
+      dqRow.style.display = 'flex';
+    } else {
+      dqRow.style.display = 'none';
+    }
+
+    // Application link button
+    var appUrl = g['Application URL'] || g['Source URL'] || '#';
+    var appLink = document.getElementById('dpAppLink');
+    appLink.href = appUrl;
+    appLink.style.opacity = appUrl === '#' ? '0.5' : '1';
+    appLink.style.pointerEvents = appUrl === '#' ? 'none' : 'auto';
+
+    // Overall score
+    document.getElementById('dpOverallScore').textContent = score.toFixed(1);
+
+    // Score cards
+    var scoreData = [
+      {
+        name:    'Geographic Alignment',
+        score:   parseFloat(g['Score: Geographic Alignment']) || 0,
+        reason:  g['Reason: Geographic'] || '',
+        weight:  false
+      },
+      {
+        name:    'Population Alignment',
+        score:   parseFloat(g['Score: Population Alignment']) || 0,
+        reason:  g['Reason: Population'] || '',
+        weight:  false
+      },
+      {
+        name:    'Budget Fit',
+        score:   parseFloat(g['Score: Budget Fit']) || 0,
+        reason:  g['Reason: Budget'] || '',
+        weight:  true
+      },
+      {
+        name:    'Timeline Feasibility',
+        score:   parseFloat(g['Score: Timeline Feasibility']) || 0,
+        reason:  g['Reason: Timeline'] || '',
+        weight:  false
+      }
+    ];
+
+    var cardsHtml = '';
+    scoreData.forEach(function(c) {
+      var filled = Math.round(c.score);
+      var stars  = '';
+      for (var i = 1; i <= 5; i++) {
+        stars += '<span class="star ' + (i <= filled ? 'filled' : '') + '">★</span>';
+      }
+      cardsHtml +=
+        '<div class="score-card">' +
+          '<div class="score-card-header">' +
+            '<span class="score-card-name">' + c.name + '</span>' +
+            (c.weight ? '<span class="highest-weight">2× weight</span>' : '') +
+          '</div>' +
+          '<div class="stars" style="margin-bottom:4px;">' + stars + '</div>' +
+          '<div class="score-card-val">' + c.score.toFixed(1) + '/5</div>' +
+          '<div class="score-card-explanation">' + (c.reason || '—') + '</div>' +
+        '</div>';
+    });
+    document.getElementById('dpScoreCards').innerHTML = cardsHtml;
+
+    // Open panel
+    document.getElementById('detailBackdrop').classList.add('open');
+    document.getElementById('detailPanel').classList.add('open');
+  }
+
+  function closeDetailPanel() {
+    document.getElementById('detailBackdrop').classList.remove('open');
+    document.getElementById('detailPanel').classList.remove('open');
+  }
+
+  // ── Run Agent Modal ────────────────────────────────────
+  function openRunAgentModal() {
+    document.getElementById('runAgentModal').classList.add('open');
+    runAgent();
+  }
+
+  function closeRunAgentModal() {
+    document.getElementById('runAgentModal').classList.remove('open');
+  }
+
+  function runAgent() {
+    var log      = document.getElementById('agentLog');
+    var bar      = document.getElementById('agentProgressBar');
+    var label    = document.getElementById('agentProgressLabel');
+    var status   = document.getElementById('agentStatusText');
+    var cancelBtn = document.getElementById('agentCancelBtn');
+
+    log.textContent = '';
+    bar.style.width = '0%';
+    label.textContent = '0%';
+    status.textContent = 'Starting grant search…';
+
+    fetch('/api/run-agent', { method: 'POST' })
+      .then(function(r) { return r.body.getReader(); })
+      .then(function(reader) {
+        cancelBtn.textContent = 'Close';
+        var decoder = new TextDecoder();
+        var progress = 0;
+
+        function read() {
+          reader.read().then(function(result) {
+            if (result.done) {
+              bar.style.width = '100%';
+              label.textContent = '100%';
+              status.textContent = 'Search complete! Reloading…';
+              setTimeout(function() {
+                window.location.reload();
+              }, 1500);
+              return;
+            }
+
+            var text = decoder.decode(result.value, { stream: true });
+            var lines = text.split('\n');
+            lines.forEach(function(line) {
+              if (!line.trim()) return;
+              log.textContent += line + '\n';
+              log.scrollTop = log.scrollHeight;
+
+              // Parse progress hints from the stream
+              if (line.includes('Query')) {
+                var m = line.match(/Query (\d+)\/(\d+)/);
+                if (m) {
+                  progress = Math.round((parseInt(m[1]) / parseInt(m[2])) * 90);
+                  bar.style.width  = progress + '%';
+                  label.textContent = progress + '%';
+                  status.textContent = 'Processing query ' + m[1] + ' of ' + m[2] + '…';
+                }
+              } else if (line.includes('Scoring')) {
+                status.textContent = 'Scoring results…';
+                bar.style.width = '92%';
+              } else if (line.includes('Saving') || line.includes('Export')) {
+                status.textContent = 'Saving results…';
+                bar.style.width = '97%';
+              }
+            });
+            read();
+          });
+        }
+        read();
+      })
+      .catch(function(err) {
+        status.textContent = 'Error: ' + err.message;
+        log.textContent += '\nError: ' + err.message;
+      });
+  }
+
+  // ── Search Archival (990) ──────────────────────────────
+  function runSearch990() {
+    fetch('/api/search-990', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (window.showFlash) {
+          window.showFlash(data.message || 'Archival search started.', 'info');
+        }
+      });
+  }
+
+  // ── Sort ───────────────────────────────────────────────
+  function sortGrants(criterion) {
+    ['listActNow', 'listComingUp'].forEach(function(listId) {
+      var list  = document.getElementById(listId);
+      if (!list) return;
+      var cards = Array.from(list.querySelectorAll('.grant-card'));
+      cards.sort(function(a, b) {
+        if (criterion === 'score') {
+          return parseFloat(b.getAttribute('data-score')) - parseFloat(a.getAttribute('data-score'));
+        } else if (criterion === 'deadline') {
+          return parseInt(a.getAttribute('data-days'))  - parseInt(b.getAttribute('data-days'));
+        } else if (criterion === 'funder') {
+          return a.getAttribute('data-funder').localeCompare(b.getAttribute('data-funder'));
+        }
+        return 0;
+      });
+      cards.forEach(function(card) { list.appendChild(card); });
+    });
+  }
+</script>
+{% endblock %}

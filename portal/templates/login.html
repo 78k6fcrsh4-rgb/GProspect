@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign In — GrantScout AI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+
+<div class="login-page">
+
+  <div class="login-card">
+
+    <!-- Header -->
+    <div class="login-card-header">
+      <div class="login-logo">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="9"/>
+          <circle cx="12" cy="12" r="4"/>
+          <line x1="12" y1="2"  x2="12" y2="6"/>
+          <line x1="12" y1="18" x2="12" y2="22"/>
+          <line x1="2"  y1="12" x2="6"  y2="12"/>
+          <line x1="18" y1="12" x2="22" y2="12"/>
+        </svg>
+      </div>
+      <div class="login-title">GrantScout AI</div>
+      <div class="login-caption">Prospecting Agent</div>
+    </div>
+
+    <!-- Tab switcher -->
+    <div class="login-tabs">
+      <button class="login-tab-btn active" id="tabSignIn" onclick="switchLoginTab('signin')">
+        Sign In
+      </button>
+      <button class="login-tab-btn" id="tabSignUp" onclick="switchLoginTab('signup')">
+        Sign Up
+      </button>
+    </div>
+
+    <div class="login-card-body">
+
+      <!-- ── SIGN IN PANEL ─────────────────────────────── -->
+      <div class="login-tab-panel active" id="panelSignin">
+
+        {% if error %}
+        <div class="info-banner red mb-12">
+          ✕ &nbsp;{{ error }}
+        </div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('auth.login') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() if csrf_token is defined else '' }}" />
+
+          <div class="form-group mb-12">
+            <label class="form-label" for="signin_email">Email</label>
+            <input
+              class="form-input"
+              type="email"
+              id="signin_email"
+              name="email"
+              placeholder="you@organization.org"
+              required
+              autocomplete="email"
+            />
+          </div>
+
+          <div class="form-group mb-16">
+            <label class="form-label" for="signin_password">Password</label>
+            <input
+              class="form-input"
+              type="password"
+              id="signin_password"
+              name="password"
+              placeholder="••••••••"
+              required
+              autocomplete="current-password"
+            />
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-full btn-lg">
+            Sign In
+          </button>
+        </form>
+
+        <!-- Demo credentials hint -->
+        <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border);">
+          <div style="font-size: 11.5px; color: var(--text-faint); text-align: center; margin-bottom: 8px;">
+            Demo credentials
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 5px;">
+            <button class="btn btn-ghost btn-sm" style="font-size: 11.5px; justify-content: flex-start; font-family: var(--font-mono);"
+                    onclick="fillCreds('admin@deborahsplace.org','AIforGood2026!')">
+              admin@deborahsplace.org &nbsp;/&nbsp; AIforGood2026!
+            </button>
+            <button class="btn btn-ghost btn-sm" style="font-size: 11.5px; justify-content: flex-start; font-family: var(--font-mono);"
+                    onclick="fillCreds('alex@deborahsplace.org','demo1234')">
+              alex@deborahsplace.org &nbsp;/&nbsp; demo1234
+            </button>
+            <button class="btn btn-ghost btn-sm" style="font-size: 11.5px; justify-content: flex-start; font-family: var(--font-mono);"
+                    onclick="fillCreds('priya@deborahsplace.org','demo1234')">
+              priya@deborahsplace.org &nbsp;/&nbsp; demo1234
+            </button>
+          </div>
+        </div>
+
+      </div>
+      <!-- end sign in panel -->
+
+      <!-- ── SIGN UP PANEL ─────────────────────────────── -->
+      <div class="login-tab-panel" id="panelSignup">
+
+        <!-- Step 1 — Role selection + user details -->
+        <div id="signupStep1">
+
+          <!-- Step indicator -->
+          <div class="step-indicator mb-16">
+            <div class="step-dot active" id="step1dot">1</div>
+            <div class="step-line" id="stepLine1"></div>
+            <div class="step-dot" id="step2dot">2</div>
+          </div>
+
+          <div class="form-group mb-12">
+            <label class="form-label" for="signup_role">I am signing up as</label>
+            <select class="form-select" id="signup_role" onchange="handleRoleChange(this.value)">
+              <option value="user">Basic User</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+
+          <!-- Basic user warning -->
+          <div class="info-banner amber mb-12" id="basicUserWarning">
+            ⚠️ &nbsp;Basic User accounts require admin approval before you can sign in.
+          </div>
+
+          <!-- Admin note (hidden by default) -->
+          <div class="info-banner blue mb-12 hidden" id="adminNote">
+            ℹ️ &nbsp;Admin accounts include organization setup in Step 2.
+          </div>
+
+          <div class="form-grid cols-1" style="gap: 10px;">
+            <div class="form-group">
+              <label class="form-label" for="su_name">
+                Full Name <span class="form-required">*</span>
+              </label>
+              <input class="form-input" type="text" id="su_name" name="full_name"
+                     placeholder="Jane Smith" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="su_title">Job Title</label>
+              <input class="form-input" type="text" id="su_title" name="title"
+                     placeholder="Development Associate" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="su_org">Organization</label>
+              <input class="form-input" type="text" id="su_org" name="organization"
+                     placeholder="Deborah's Place" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="su_email">
+                Work Email <span class="form-required">*</span>
+              </label>
+              <input class="form-input" type="email" id="su_email" name="email"
+                     placeholder="jane@organization.org" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="su_phone">Phone</label>
+              <input class="form-input" type="tel" id="su_phone" name="phone"
+                     placeholder="(312) 555-0100" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="su_password">
+                Password <span class="form-required">*</span>
+              </label>
+              <input class="form-input" type="password" id="su_password" name="password"
+                     placeholder="••••••••" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="su_confirm">
+                Confirm Password <span class="form-required">*</span>
+              </label>
+              <input class="form-input" type="password" id="su_confirm" name="confirm_password"
+                     placeholder="••••••••" required />
+            </div>
+          </div>
+
+          <div style="margin-top: 16px;">
+            <!-- Basic user: submit directly -->
+            <button type="button" class="btn btn-primary btn-full btn-lg"
+                    id="btnBasicSubmit" onclick="submitBasicSignup()">
+              Submit Account Request
+            </button>
+            <!-- Admin: go to step 2 -->
+            <button type="button" class="btn btn-primary btn-full btn-lg hidden"
+                    id="btnAdminNext" onclick="goToStep2()">
+              Next: Organization Profile →
+            </button>
+          </div>
+
+        </div>
+        <!-- end step 1 -->
+
+        <!-- Step 2 — Admin org profile (hidden until step 2) -->
+        <div id="signupStep2" class="hidden">
+
+          <div class="step-indicator mb-16">
+            <div class="step-dot done">✓</div>
+            <div class="step-line done"></div>
+            <div class="step-dot active">2</div>
+          </div>
+
+          <div style="font-size: 13.5px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">
+            Organization Profile
+          </div>
+          <div style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 16px;">
+            Tell us about the organization you'll be prospecting for.
+          </div>
+
+          <div class="form-grid cols-1" style="gap: 10px;">
+            <div class="form-group">
+              <label class="form-label" for="org_name">Organization Name</label>
+              <input class="form-input" type="text" id="org_name" name="org_name"
+                     placeholder="Deborah's Place" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="org_mission">Mission Statement</label>
+              <textarea class="form-textarea" id="org_mission" name="mission"
+                        placeholder="We provide safe, supportive housing…" rows="2"></textarea>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="org_needs">Funding Needs</label>
+              <textarea class="form-textarea" id="org_needs" name="funding_needs"
+                        placeholder="We are seeking funding for…" rows="2"></textarea>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="org_programs">Program Areas</label>
+              <input class="form-input" type="text" id="org_programs" name="program_areas"
+                     placeholder="Housing, Mental Health, Workforce Development" />
+            </div>
+            <div class="form-grid" style="gap: 10px; display: grid; grid-template-columns: 1fr 1fr;">
+              <div class="form-group">
+                <label class="form-label" for="org_geo">Geographic Focus</label>
+                <select class="form-select" id="org_geo" name="geographic_focus">
+                  <option value="">Select…</option>
+                  <option value="Chicago, IL">Chicago, IL</option>
+                  <option value="Chicagoland">Chicagoland</option>
+                  <option value="Illinois">Illinois</option>
+                  <option value="Midwest">Midwest</option>
+                  <option value="National">National</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="org_budget">Budget Range</label>
+                <select class="form-select" id="org_budget" name="budget_range">
+                  <option value="">Select…</option>
+                  <option value="Under $1M">Under $1M</option>
+                  <option value="$1M–$5M">$1M–$5M</option>
+                  <option value="$5M–$10M">$5M–$10M</option>
+                  <option value="$10M+">$10M+</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="org_populations">Populations Served</label>
+              <textarea class="form-textarea" id="org_populations" name="populations_served"
+                        placeholder="Women experiencing homelessness…" rows="2"></textarea>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 8px; margin-top: 16px;">
+            <button type="button" class="btn btn-secondary" onclick="backToStep1()">
+              ← Back
+            </button>
+            <button type="button" class="btn btn-primary" style="flex: 1;"
+                    onclick="submitAdminSignup()">
+              Create Account
+            </button>
+          </div>
+
+        </div>
+        <!-- end step 2 -->
+
+        <!-- Success screen (hidden until submitted) -->
+        <div id="signupSuccess" class="hidden signup-success">
+          <div class="success-icon">✓</div>
+          <div class="success-title">Request Submitted</div>
+          <div class="success-text">
+            Your account request has been sent to an administrator for approval.
+            You'll receive an email when your account is activated.
+          </div>
+          <button type="button" class="btn btn-secondary mt-16"
+                  onclick="switchLoginTab('signin')">
+            ← Back to Sign In
+          </button>
+        </div>
+
+      </div>
+      <!-- end sign up panel -->
+
+    </div>
+    <!-- end card body -->
+
+  </div>
+  <!-- end login card -->
+
+</div>
+<!-- end login page -->
+
+<script>
+  // Tab switcher
+  function switchLoginTab(tab) {
+    document.getElementById('tabSignIn').classList.toggle('active', tab === 'signin');
+    document.getElementById('tabSignUp').classList.toggle('active', tab === 'signup');
+    document.getElementById('panelSignin').classList.toggle('active', tab === 'signin');
+    document.getElementById('panelSignup').classList.toggle('active', tab === 'signup');
+  }
+
+  // Role change handler
+  function handleRoleChange(role) {
+    var isAdmin = role === 'admin';
+    document.getElementById('basicUserWarning').classList.toggle('hidden', isAdmin);
+    document.getElementById('adminNote').classList.toggle('hidden', !isAdmin);
+    document.getElementById('btnBasicSubmit').classList.toggle('hidden', isAdmin);
+    document.getElementById('btnAdminNext').classList.toggle('hidden', !isAdmin);
+  }
+
+  // Step navigation
+  function goToStep2() {
+    if (!validateStep1()) return;
+    document.getElementById('signupStep1').classList.add('hidden');
+    document.getElementById('signupStep2').classList.remove('hidden');
+  }
+
+  function backToStep1() {
+    document.getElementById('signupStep2').classList.add('hidden');
+    document.getElementById('signupStep1').classList.remove('hidden');
+  }
+
+  // Validation
+  function validateStep1() {
+    var name  = document.getElementById('su_name').value.trim();
+    var email = document.getElementById('su_email').value.trim();
+    var pw    = document.getElementById('su_password').value;
+    var conf  = document.getElementById('su_confirm').value;
+
+    if (!name)  { alert('Full name is required.'); return false; }
+    if (!email) { alert('Work email is required.'); return false; }
+    if (!pw)    { alert('Password is required.'); return false; }
+    if (pw !== conf) { alert('Passwords do not match.'); return false; }
+    return true;
+  }
+
+  // Submit basic user signup
+  function submitBasicSignup() {
+    if (!validateStep1()) return;
+    var data = {
+      role:         'user',
+      full_name:    document.getElementById('su_name').value,
+      title:        document.getElementById('su_title').value,
+      organization: document.getElementById('su_org').value,
+      email:        document.getElementById('su_email').value,
+      phone:        document.getElementById('su_phone').value,
+      password:     document.getElementById('su_password').value,
+    };
+    postSignup(data);
+  }
+
+  // Submit admin signup
+  function submitAdminSignup() {
+    var data = {
+      role:              'admin',
+      full_name:         document.getElementById('su_name').value,
+      title:             document.getElementById('su_title').value,
+      organization:      document.getElementById('su_org').value,
+      email:             document.getElementById('su_email').value,
+      phone:             document.getElementById('su_phone').value,
+      password:          document.getElementById('su_password').value,
+      org_name:          document.getElementById('org_name').value,
+      mission:           document.getElementById('org_mission').value,
+      funding_needs:     document.getElementById('org_needs').value,
+      program_areas:     document.getElementById('org_programs').value,
+      geographic_focus:  document.getElementById('org_geo').value,
+      budget_range:      document.getElementById('org_budget').value,
+      populations_served: document.getElementById('org_populations').value,
+    };
+    postSignup(data);
+  }
+
+  function postSignup(data) {
+    fetch('/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (res.success) {
+        // Show success screen
+        document.getElementById('signupStep1').classList.add('hidden');
+        document.getElementById('signupStep2').classList.add('hidden');
+        document.getElementById('signupSuccess').classList.remove('hidden');
+      } else {
+        alert(res.error || 'Something went wrong. Please try again.');
+      }
+    })
+    .catch(function() {
+      alert('Network error. Please try again.');
+    });
+  }
+
+  // Fill demo credentials
+  function fillCreds(email, password) {
+    document.getElementById('signin_email').value = email;
+    document.getElementById('signin_password').value = password;
+  }
+</script>
+
+</body>
+</html>

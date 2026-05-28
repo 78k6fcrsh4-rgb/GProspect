@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+{% block title %}User Management — GrantScout AI{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <h1 class="page-title">User Management</h1>
+  <p class="page-subtitle">Manage team access to the GrantScout AI portal.</p>
+</div>
+
+<!-- ── Pending Approvals ─────────────────────────────────── -->
+{% if pending_users %}
+<div class="pending-box">
+  <div class="pending-box-header">
+    <span style="font-size: 16px;">⏳</span>
+    <span class="pending-box-title">
+      Pending Approvals ({{ pending_users | length }})
+    </span>
+  </div>
+
+  <div style="overflow-x: auto;">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Organization</th>
+          <th>Title</th>
+          <th>Requested Role</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in pending_users %}
+        <tr id="pending-row-{{ user.id }}">
+          <td style="font-weight: 600;">{{ user.full_name }}</td>
+          <td style="color: var(--text-muted);">{{ user.email }}</td>
+          <td>{{ user.organization or '—' }}</td>
+          <td>{{ user.title or '—' }}</td>
+          <td>
+            <span class="badge {% if user.role == 'admin' %}badge-blue{% else %}badge-archival{% endif %}">
+              {{ user.role | capitalize }}
+            </span>
+          </td>
+          <td>
+            <div style="display: flex; gap: 6px;">
+              <button class="btn btn-success btn-sm"
+                      onclick="approveUser('{{ user.id }}')">
+                ✓ Approve
+              </button>
+              <button class="btn btn-danger btn-sm"
+                      onclick="denyUser('{{ user.id }}')">
+                ✕ Deny
+              </button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="info-banner green" style="margin-bottom: 20px;">
+  ✓ &nbsp;No pending approval requests.
+</div>
+{% endif %}
+
+<!-- ── Add User Directly ──────────────────────────────────── -->
+<div class="section-block" style="margin-bottom: 20px;">
+  <div class="section-block-header">
+    <div>
+      <div class="section-block-title">Add User Directly</div>
+      <div class="section-block-caption">Create an active account without requiring approval.</div>
+    </div>
+  </div>
+  <div class="inline-add-row">
+    <input class="form-input" type="text"  id="newUserName"
+           placeholder="Full name" style="min-width: 150px;" />
+    <input class="form-input" type="email" id="newUserEmail"
+           placeholder="Email address" style="min-width: 180px;" />
+    <input class="form-input" type="password" id="newUserPassword"
+           placeholder="Temporary password" style="min-width: 150px;" />
+    <select class="form-select" id="newUserRole" style="min-width: 130px;">
+      <option value="user">Basic User</option>
+      <option value="admin">Admin</option>
+    </select>
+    <button class="btn btn-primary" onclick="addUserDirectly()">
+      + Add User
+    </button>
+  </div>
+  <div id="addUserMsg" style="padding: 0 18px 12px; display: none;"></div>
+</div>
+
+<!-- ── Active Team ───────────────────────────────────────── -->
+<div class="section-block">
+  <div class="section-block-header">
+    <div>
+      <div class="section-block-title">
+        Active Team
+        <span class="tab-count" style="margin-left: 6px;">{{ active_users | length }}</span>
+      </div>
+      <div class="section-block-caption">All users with active portal access.</div>
+    </div>
+  </div>
+
+  <div style="overflow-x: auto;">
+    <table class="data-table" id="activeUsersTable">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Organization</th>
+          <th>Role</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in active_users %}
+        <tr id="active-row-{{ user.id }}">
+          <td>
+            <span style="font-weight: 600;">{{ user.full_name }}</span>
+            {% if user.email == session.get('email') %}
+            <span class="you-badge">You</span>
+            {% endif %}
+          </td>
+          <td style="color: var(--text-muted);">{{ user.email }}</td>
+          <td>{{ user.organization or '—' }}</td>
+          <td>
+            {% if user.email == session.get('email') %}
+              <!-- Cannot change own role -->
+              <span class="badge badge-blue">{{ user.role | capitalize }}</span>
+            {% else %}
+              <select class="form-select" style="font-size: 12px; padding: 4px 24px 4px 8px;"
+                      onchange="changeRole('{{ user.id }}', this.value)">
+                <option value="user"  {% if user.role == 'user'  %}selected{% endif %}>Basic User</option>
+                <option value="admin" {% if user.role == 'admin' %}selected{% endif %}>Admin</option>
+              </select>
+            {% endif %}
+          </td>
+          <td>
+            {% if user.email == session.get('email') %}
+              <span style="font-size: 11.5px; color: var(--text-faint);">—</span>
+            {% else %}
+              <button class="btn btn-danger btn-sm"
+                      onclick="deleteUser('{{ user.id }}', '{{ user.full_name | e }}')"
+                      title="Remove user">
+                🗑
+              </button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+
+  // ── Approve pending user ───────────────────────────────
+  function approveUser(userId) {
+    fetch('/users/approve/' + userId, { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (res.success) {
+          var row = document.getElementById('pending-row-' + userId);
+          if (row) {
+            row.style.opacity = '0';
+            row.style.transition = 'opacity 0.3s';
+            setTimeout(function() { row.remove(); checkNoPending(); }, 300);
+          }
+          if (window.showFlash) window.showFlash('User approved.', 'success');
+          // Reload to refresh active table
+          setTimeout(function() { window.location.reload(); }, 800);
+        } else {
+          if (window.showFlash) window.showFlash(res.error || 'Failed to approve.', 'error');
+        }
+      });
+  }
+
+  // ── Deny pending user ──────────────────────────────────
+  function denyUser(userId) {
+    if (!confirm('Deny this account request? This cannot be undone.')) return;
+    fetch('/users/deny/' + userId, { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (res.success) {
+          var row = document.getElementById('pending-row-' + userId);
+          if (row) {
+            row.style.opacity = '0';
+            row.style.transition = 'opacity 0.3s';
+            setTimeout(function() { row.remove(); checkNoPending(); }, 300);
+          }
+          if (window.showFlash) window.showFlash('Request denied.', 'info');
+        } else {
+          if (window.showFlash) window.showFlash(res.error || 'Failed to deny.', 'error');
+        }
+      });
+  }
+
+  function checkNoPending() {
+    var tbody = document.querySelector('.pending-box tbody');
+    if (tbody && tbody.querySelectorAll('tr').length === 0) {
+      window.location.reload();
+    }
+  }
+
+  // ── Add user directly ──────────────────────────────────
+  function addUserDirectly() {
+    var name     = document.getElementById('newUserName').value.trim();
+    var email    = document.getElementById('newUserEmail').value.trim();
+    var password = document.getElementById('newUserPassword').value;
+    var role     = document.getElementById('newUserRole').value;
+
+    var msgEl = document.getElementById('addUserMsg');
+
+    if (!name)     { showAddMsg('Full name is required.', 'red'); return; }
+    if (!email)    { showAddMsg('Email is required.', 'red'); return; }
+    if (!password) { showAddMsg('Temporary password is required.', 'red'); return; }
+
+    fetch('/users/add', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ full_name: name, email: email, password: password, role: role })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (res.success) {
+        if (window.showFlash) window.showFlash('User added successfully.', 'success');
+        document.getElementById('newUserName').value     = '';
+        document.getElementById('newUserEmail').value    = '';
+        document.getElementById('newUserPassword').value = '';
+        setTimeout(function() { window.location.reload(); }, 800);
+      } else {
+        showAddMsg(res.error || 'Failed to add user.', 'red');
+      }
+    })
+    .catch(function() { showAddMsg('Network error.', 'red'); });
+  }
+
+  function showAddMsg(text, type) {
+    var el = document.getElementById('addUserMsg');
+    el.innerHTML = '<div class="info-banner ' + type + '">✕ &nbsp;' + text + '</div>';
+    el.style.display = 'block';
+    setTimeout(function() { el.style.display = 'none'; }, 4000);
+  }
+
+  // ── Change role ────────────────────────────────────────
+  function changeRole(userId, newRole) {
+    fetch('/users/role/' + userId, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ role: newRole })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (res.success) {
+        if (window.showFlash) window.showFlash('Role updated.', 'success');
+      } else {
+        if (window.showFlash) window.showFlash(res.error || 'Failed to update role.', 'error');
+        window.location.reload();
+      }
+    });
+  }
+
+  // ── Delete user ────────────────────────────────────────
+  function deleteUser(userId, name) {
+    if (!confirm('Remove ' + name + '? They will lose all portal access.')) return;
+    fetch('/users/delete/' + userId, { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (res.success) {
+          var row = document.getElementById('active-row-' + userId);
+          if (row) {
+            row.style.opacity = '0';
+            row.style.transition = 'opacity 0.3s';
+            setTimeout(function() { row.remove(); }, 300);
+          }
+          if (window.showFlash) window.showFlash(name + ' removed.', 'success');
+        } else {
+          if (window.showFlash) window.showFlash(res.error || 'Failed to remove user.', 'error');
+        }
+      });
+  }
+
+</script>
+{% endblock %}

@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}GrantScout AI{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  {% block head %}{% endblock %}
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- ── Sidebar ─────────────────────────────────────────── -->
+  <aside class="sidebar">
+
+    <!-- Logo -->
+    <div class="sidebar-logo">
+      <div class="logo-icon">
+        <!-- Target / crosshair icon -->
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="9"/>
+          <circle cx="12" cy="12" r="4"/>
+          <line x1="12" y1="2"  x2="12" y2="6"/>
+          <line x1="12" y1="18" x2="12" y2="22"/>
+          <line x1="2"  y1="12" x2="6"  y2="12"/>
+          <line x1="18" y1="12" x2="22" y2="12"/>
+        </svg>
+      </div>
+      <div class="logo-text">
+        <span class="logo-name">GrantScout AI</span>
+        <span class="logo-caption">Prospecting Agent</span>
+      </div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="sidebar-nav">
+      <div class="nav-label">Navigation</div>
+
+      <a href="{{ url_for('dashboard.index') }}"
+         class="nav-item {% if active_page == 'dashboard' %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="9"/>
+          <rect x="14" y="3" width="7" height="5"/>
+          <rect x="14" y="12" width="7" height="9"/>
+          <rect x="3" y="16" width="7" height="5"/>
+        </svg>
+        <span>Dashboard</span>
+      </a>
+
+      <a href="{{ url_for('profile.index') }}"
+         class="nav-item {% if active_page == 'profile' %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+          <polyline points="9 22 9 12 15 12 15 22"/>
+        </svg>
+        <span>Organization Profile</span>
+      </a>
+
+      <a href="{{ url_for('grants.add') }}"
+         class="nav-item {% if active_page == 'add_grant' %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="16"/>
+          <line x1="8" y1="12" x2="16" y2="12"/>
+        </svg>
+        <span>Add Grant Manually</span>
+      </a>
+
+      {% if session.get('role') == 'admin' %}
+      <a href="{{ url_for('users.index') }}"
+         class="nav-item {% if active_page == 'users' %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        <span>User Management</span>
+      </a>
+      {% endif %}
+
+      <hr class="sidebar-divider" />
+
+      <button class="nav-item" onclick="openAlertPanel()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        <span>Alert Log</span>
+        {% if alert_count and alert_count > 0 %}
+        <span class="badge">{{ alert_count }}</span>
+        {% endif %}
+      </button>
+    </nav>
+
+    <!-- User info -->
+    <div class="sidebar-user">
+      <div class="user-label">Signed in as</div>
+      <div class="user-name">{{ session.get('full_name', 'User') }}</div>
+      <div class="user-email">{{ session.get('email', '') }}</div>
+      {% if session.get('title') %}
+      <div class="user-title-text">{{ session.get('title') }}</div>
+      {% endif %}
+
+      <!-- Role switcher (demo feature) -->
+      <select class="role-switcher" onchange="switchRole(this.value)">
+        <option value="admin"  {% if session.get('role') == 'admin'  %}selected{% endif %}>
+          👤 Admin
+        </option>
+        <option value="user"   {% if session.get('role') == 'user'   %}selected{% endif %}>
+          👤 Basic User
+        </option>
+      </select>
+
+      <a href="{{ url_for('auth.logout') }}" class="btn-signout">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+        Sign Out
+      </a>
+    </div>
+
+  </aside>
+  <!-- end sidebar -->
+
+  <!-- ── Main Wrapper ──────────────────────────────────────── -->
+  <div class="main-wrapper">
+
+    <!-- Top Status Bar -->
+    <div class="topbar">
+      <div class="topbar-status">
+        <div class="status-dot"></div>
+        <span class="status-label">24/7 Background Agent</span>
+        <span class="status-badge">Active</span>
+        <span class="status-meta">
+          &nbsp;·&nbsp; Last checked:
+          {% if last_checked %}{{ last_checked }}{% else %}never{% endif %}
+          &nbsp;·&nbsp; hourly automation
+        </span>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn btn-secondary btn-sm" onclick="simulateAlert()">
+          Simulate Alert
+        </button>
+        <button class="btn btn-secondary btn-sm" onclick="openAlertPanel()">
+          Alert Log
+          {% if alert_count and alert_count > 0 %}
+            ({{ alert_count }})
+          {% endif %}
+        </button>
+      </div>
+    </div>
+
+    <!-- Page Content -->
+    <div class="page-content">
+      {% block content %}{% endblock %}
+    </div>
+
+  </div>
+  <!-- end main-wrapper -->
+
+</div>
+<!-- end layout -->
+
+<!-- ── Alert Log Panel ──────────────────────────────────── -->
+<div class="overlay-backdrop" id="alertBackdrop" onclick="closeAlertPanel()"></div>
+<div class="alert-panel" id="alertPanel">
+  <div class="alert-panel-header">
+    <div>
+      <div class="alert-panel-title">Alert Log</div>
+      <div class="alert-panel-caption">
+        Email alerts dispatched to your team when new leads are discovered.
+      </div>
+    </div>
+    <button class="detail-close" onclick="closeAlertPanel()">✕</button>
+  </div>
+
+  {% if alerts %}
+    {% for alert in alerts %}
+    <div class="alert-item">
+      <div class="alert-grant-name">{{ alert.grant_name }}</div>
+      <div class="alert-funder">{{ alert.funder }}</div>
+      <div class="alert-meta">
+        Sent to {{ alert.recipients }} recipient{{ 's' if alert.recipients != 1 else '' }}
+        &nbsp;·&nbsp; {{ alert.time_ago }}
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="empty-state">
+      <div class="empty-state-icon">🔔</div>
+      <div class="empty-state-title">No alerts yet</div>
+      <div class="empty-state-text">
+        Alerts will appear here when the agent discovers new grant leads.
+      </div>
+    </div>
+  {% endif %}
+</div>
+
+<!-- ── Flash Messages ───────────────────────────────────── -->
+<div class="flash-container" id="flashContainer">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+    <div class="flash-msg {{ category }}" onclick="this.remove()">
+      {% if category == 'success' %}✓{% elif category == 'error' %}✕{% else %}ℹ{% endif %}
+      {{ message }}
+    </div>
+    {% endfor %}
+  {% endwith %}
+</div>
+
+<!-- ── Scripts ──────────────────────────────────────────── -->
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+
+<script>
+  // Auto-dismiss flash messages after 4 seconds
+  document.querySelectorAll('.flash-msg').forEach(function(el) {
+    setTimeout(function() {
+      el.style.opacity = '0';
+      el.style.transition = 'opacity 0.3s ease';
+      setTimeout(function() { el.remove(); }, 300);
+    }, 4000);
+  });
+
+  // Alert panel
+  function openAlertPanel() {
+    document.getElementById('alertBackdrop').classList.add('open');
+    document.getElementById('alertPanel').classList.add('open');
+  }
+
+  function closeAlertPanel() {
+    document.getElementById('alertBackdrop').classList.remove('open');
+    document.getElementById('alertPanel').classList.remove('open');
+  }
+
+  // Role switcher (demo)
+  function switchRole(role) {
+    fetch('/api/switch-role', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: role })
+    }).then(function() {
+      window.location.reload();
+    });
+  }
+
+  // Simulate alert (demo)
+  function simulateAlert() {
+    fetch('/api/simulate-alert', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        showFlash(data.message || 'Alert simulated!', 'success');
+      });
+  }
+
+  // Flash helper for JS-triggered messages
+  function showFlash(message, type) {
+    var container = document.getElementById('flashContainer');
+    var el = document.createElement('div');
+    el.className = 'flash-msg ' + (type || 'info');
+    el.textContent = message;
+    el.onclick = function() { el.remove(); };
+    container.appendChild(el);
+    setTimeout(function() {
+      el.style.opacity = '0';
+      el.style.transition = 'opacity 0.3s ease';
+      setTimeout(function() { el.remove(); }, 300);
+    }, 4000);
+  }
+
+  // Expose showFlash globally for other scripts
+  window.showFlash = showFlash;
+</script>
+
+{% block scripts %}{% endblock %}
+
+</body>
+</html>
