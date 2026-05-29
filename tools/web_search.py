@@ -66,7 +66,7 @@ class WebSearchTool(BaseTool):
 
     # Delay between API calls to avoid rate limiting
     # 1 second between calls is a safe default
-    REQUEST_DELAY_SECONDS = 5.0
+    REQUEST_DELAY_SECONDS = 10.0
 
     def __init__(self, profile: OrgProfile) -> None:
         """
@@ -114,7 +114,7 @@ class WebSearchTool(BaseTool):
             # Call the Claude API with web search tool enabled
             response = self.client.messages.create(
                model="claude-haiku-4-5-20251001",
-                max_tokens=8000,
+                max_tokens=2000,
                 tools=[
                     {
                         "type": "web_search_20250305",
