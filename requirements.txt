@@ -16,6 +16,7 @@ pydantic[email]>=2.7.0           # EmailStr
 # Auth
 python-jose[cryptography]>=3.3.0 # JWT
 passlib[bcrypt]>=1.7.4           # password hashing
+bcrypt<4.1                       # passlib 1.7.4 is incompatible with bcrypt >= 4.1
 
 # Agent / data sources
 anthropic>=0.34.0                # AI scoring + web search
@@ -23,3 +24,4 @@ requests>=2.31.0                 # grants.gov, IRS 990
 
 # Export
 openpyxl>=3.1.2                  # Excel export
+streamlit>=1.31.0
