@@ -56,26 +56,14 @@ Every result is scored on a 1–5 qualification matrix across four criteria — 
 
 ## Tech Stack
 
-### Agent Engine
 | Library | Purpose |
 |---|---|
 | Python 3.11+ | Core language |
-| Anthropic Claude API | AI scoring, web search, gap analysis |
-| Pydantic v2 | Profile schema validation |
-| Requests + BeautifulSoup4 | Web scraping and HTTP calls |
-| Pandas + OpenPyXL | Data wrangling and Excel export |
-| python-dotenv | API key management |
-| Loguru | Structured logging |
-| Schedule | Cycle automation |
-
-### Web Portal
-| Library | Purpose |
-|---|---|
 | Streamlit | Browser-based UI — no frontend code required |
-| FastAPI | Backend REST API |
-| SQLAlchemy + SQLite | Database for users, results, and learning log |
-| Passlib + bcrypt | Secure password hashing |
-| python-jose | JWT session token management |
+
+The app runs entirely from a single self-contained entry point (`main.py`) with
+one dependency. There are no API keys, no database, and no cryptographic secrets
+to manage.
 
 ---
 
@@ -140,7 +128,8 @@ The tool is configured to prioritize private foundations given the current feder
 
 ### Requirements
 - Python 3.11+
-- Anthropic API key (for AI scoring and web search)
+
+No API keys, no database setup, and no cryptographic secrets are required to run the app.
 
 ### Setup
 
@@ -149,38 +138,19 @@ The tool is configured to prioritize private foundations given the current feder
 git clone https://github.com/78k6fcrsh4-rgb/GProspect.git
 cd GProspect
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
+# Install the single dependency
 pip install -r requirements.txt
-
-# Copy environment template and add your API key
-cp .env.example .env
-# Edit .env and add your ANTHROPIC_API_KEY
 ```
 
-### Run the Agent
+### Run the App
+
+One command starts the full web app in your browser:
 
 ```bash
-# Run a quick search for Deborah's Place
-python3 run_agent.py --profile profiles/deborah_place.json --queries 5
-
-# Search for a specific funder
-python3 run_agent.py --profile profiles/deborah_place.json --search "Polk Bros Foundation open grants 2026"
-
-# Start autonomous mode (runs all three cycles on schedule)
-python3 -m agent.scheduler --profile profiles/deborah_place.json
+streamlit run main.py
 ```
 
-### Start the Web Portal
-
-```bash
-streamlit run portal/streamlit_app.py
-```
-
-Open `http://localhost:8501` in your browser. Log in with your credentials. No terminal knowledge required after this point.
+Streamlit opens `http://localhost:8501` automatically. Sign in with the demo credentials shown on the login screen (`alex@deborahsplace.org` / `demo1234`). No terminal knowledge required after this point.
 
 ---
 

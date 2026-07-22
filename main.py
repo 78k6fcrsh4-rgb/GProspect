@@ -13,7 +13,8 @@ st.set_page_config(
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def dl(days: int) -> str:
-    return (datetime.now() + timedelta(days=days)).strftime("%b %-d, %Y")
+    d = datetime.now() + timedelta(days=days)
+    return f"{d.strftime('%b')} {d.day}, {d.year}"
 
 def is_cold_lead(g: dict) -> bool:
     if g.get("is_manually_added"):
