@@ -2,6 +2,8 @@ import streamlit as st
 from datetime import datetime, timedelta
 import random
 import requests
+import csv
+import io
 
 st.set_page_config(
     page_title="GrantScout AI",
@@ -82,6 +84,51 @@ def analyze_required_documents(sources: list):
         if not_mentioned_by:
             conflicts[doc] = {"mentioned_by": mentioned_by, "not_mentioned_by": not_mentioned_by}
     return all_docs, conflicts
+
+def _grant_data_type(g: dict) -> str:
+    if g.get("is_demo"):
+        return "Demo Example"
+    if g.get("is_real_data"):
+        return "Real Data"
+    if g.get("is_manually_added"):
+        return "Manually Added"
+    return ""
+
+def grants_to_csv(grants: list) -> str:
+    """Flatten the current grant pipeline into a CSV string for board reporting / offline tracking."""
+    fieldnames = [
+        "Program Name", "Funding Organization", "Source", "Data Type",
+        "Match Score", "Temperature", "Deadline", "Days to Deadline",
+        "Award Range", "Application Method", "Program Contact",
+        "Eligibility", "Required Documents", "Disqualifying Restrictions",
+        "Description", "Location", "Source URL",
+    ]
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames)
+    writer.writeheader()
+    for g in grants:
+        sources = get_sources(g)
+        source_url = sources[0].get("url", "") if sources else ""
+        writer.writerow({
+            "Program Name": g.get("program_name", ""),
+            "Funding Organization": g.get("funding_org", ""),
+            "Source": g.get("source", ""),
+            "Data Type": _grant_data_type(g),
+            "Match Score": g.get("match_score", ""),
+            "Temperature": g.get("temperature", ""),
+            "Deadline": g.get("deadline", ""),
+            "Days to Deadline": g.get("days_to_deadline", ""),
+            "Award Range": g.get("award_label", ""),
+            "Application Method": g.get("application_method", ""),
+            "Program Contact": g.get("program_contact", ""),
+            "Eligibility": g.get("eligibility", ""),
+            "Required Documents": "; ".join(g.get("required_documents") or []),
+            "Disqualifying Restrictions": g.get("disqualifying_restrictions", ""),
+            "Description": g.get("description", ""),
+            "Location": g.get("location", ""),
+            "Source URL": source_url,
+        })
+    return buf.getvalue()
 
 # ── Real Data Integrations ──────────────────────────────────────────────────
 # Both APIs below are free and require no API key or account:
@@ -844,7 +891,7 @@ def show_dashboard():
     show_grant_detail()
 
     # Controls
-    cc1, cc2, cc3, cc4 = st.columns([2, 2, 2, 1])
+    cc1, cc2, cc3, cc4, cc5 = st.columns([2, 2, 2, 1, 1])
     with cc1:
         sort_by = st.selectbox("Sort", SORT_OPTIONS, index=SORT_OPTIONS.index(st.session_state.sort_by), label_visibility="collapsed", key="sort_sel")
         st.session_state.sort_by = sort_by
@@ -921,6 +968,13 @@ def show_dashboard():
         if st.button("+ Add Grant", use_container_width=True):
             st.session_state.page = "add_grant"
             st.rerun()
+
+    with cc5:
+        st.download_button(
+            "⬇️ Export", data=grants_to_csv(st.session_state.grants),
+            file_name="grantscout_pipeline.csv", mime="text/csv",
+            use_container_width=True, help="Download the full pipeline (including archival and hidden leads) as a CSV.",
+        )
 
     # Partition
     all_g = st.session_state.grants
