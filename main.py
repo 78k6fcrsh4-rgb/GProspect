@@ -792,29 +792,30 @@ def show_grant_detail():
                 missing = ", ".join(info["not_mentioned_by"])
                 st.warning(f"**{doc}** — listed by {mentioned}; not mentioned by {missing}")
 
-        st.divider()
-        st.markdown("**✉️ Draft Inquiry Email**")
-        caption = "Ready to copy and send. Introduces your organization, shows interest, makes the case for fit, then asks about required documents."
-        if conflicts:
-            caption += " Since sources disagree on requirements above, it also asks the funder to confirm the full checklist."
-        st.caption(caption)
+        if len(sources) > 1:
+            st.divider()
+            st.markdown("**✉️ Draft Inquiry Email**")
+            caption = "Ready to copy and send. Introduces your organization, shows interest, makes the case for fit, then asks about required documents."
+            if conflicts:
+                caption += " Since sources disagree on requirements above, it also asks the funder to confirm the full checklist."
+            st.caption(caption)
 
-        with st.expander("✉️ Draft Inquiry Email", expanded=True):
-            extra_info = st.text_area(
-                "Add more about your organization to weave into the draft (optional)",
-                key=f"email_extra_{g['id']}", height=80,
-                placeholder="e.g. recent program outcomes, specific alignment notes...",
-            )
-            draft = generate_email_draft(g, st.session_state.org_profile, extra_info)
-            st.markdown(
-                "<style>.st-key-email_draft_box textarea { line-height: 1.5 !important; font-family: inherit !important; }</style>",
-                unsafe_allow_html=True,
-            )
-            st.text_area(
-                "Email draft", value=draft, height=estimate_box_height(draft),
-                key="email_draft_box", label_visibility="collapsed",
-            )
-            st.caption("Click inside, select all (Ctrl+A / Cmd+A), and copy — fill in the bracketed placeholders before sending. GrantScout does not send emails automatically.")
+            with st.expander("✉️ Draft Inquiry Email", expanded=False):
+                extra_info = st.text_area(
+                    "Add more about your organization to weave into the draft (optional)",
+                    key=f"email_extra_{g['id']}", height=80,
+                    placeholder="e.g. recent program outcomes, specific alignment notes...",
+                )
+                draft = generate_email_draft(g, st.session_state.org_profile, extra_info)
+                st.markdown(
+                    "<style>.st-key-email_draft_box textarea { line-height: 1.5 !important; font-family: inherit !important; }</style>",
+                    unsafe_allow_html=True,
+                )
+                st.text_area(
+                    "Email draft", value=draft, height=estimate_box_height(draft),
+                    key="email_draft_box", label_visibility="collapsed",
+                )
+                st.caption("Click inside, select all (Ctrl+A / Cmd+A), and copy — fill in the bracketed placeholders before sending. GrantScout does not send emails automatically.")
         st.divider()
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
