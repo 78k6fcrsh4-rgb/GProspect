@@ -39,7 +39,7 @@ FIELDNAMES = [
 ]
 
 def days_from_now(n):
-    return (TODAY + timedelta(days=n)).strftime("%B %-d, %Y")
+    return (TODAY + timedelta(days=n)).strftime("%B %d, %Y").replace(" 0", " ")
 
 def make_grant(rank, funder, program, deadline_days, award_min, award_max,
                score, geo, pop, budget, timeline,
@@ -103,7 +103,7 @@ GRANTS = [
     # ── HOT LEADS (≤ 30 days) ────────────────────────────
 
     make_grant(
-        rank=1,
+        rank= 1,
         funder="Bank of America Charitable Foundation",
         program="Stable Housing and Empowering Communities",
         deadline_days=35,
