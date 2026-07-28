@@ -6,4 +6,7 @@
 #     streamlit run main.py
 #
 # No API keys, no database, and no cryptographic secrets are required.
+# "Run Grant Search" and "Search Archival (990)" call the free, keyless
+# Grants.gov and ProPublica Nonprofit Explorer public APIs over HTTPS.
 streamlit>=1.31.0
+requests>=2.31.0

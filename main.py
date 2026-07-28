@@ -1,7 +1,7 @@
 import streamlit as st
 from datetime import datetime, timedelta
-import time
 import random
+import requests
 
 st.set_page_config(
     page_title="GrantScout AI",
@@ -83,6 +83,190 @@ def analyze_required_documents(sources: list):
             conflicts[doc] = {"mentioned_by": mentioned_by, "not_mentioned_by": not_mentioned_by}
     return all_docs, conflicts
 
+# ── Real Data Integrations ──────────────────────────────────────────────────
+# Both APIs below are free and require no API key or account:
+#   Grants.gov Search2/fetchOpportunity — real federal/public grant opportunities.
+#   ProPublica Nonprofit Explorer — real IRS Form 990 financial data for any
+#   nonprofit/foundation, used here as a cultivation-research tool (it does not
+#   expose "open RFP" data, since foundations don't file that with the IRS).
+
+REQUEST_TIMEOUT = 10
+
+def _grants_gov_search(keyword: str, rows: int = 5) -> list:
+    resp = requests.post(
+        "https://api.grants.gov/v1/api/search2",
+        json={"keyword": keyword, "rows": rows, "oppStatuses": "posted"},
+        timeout=REQUEST_TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.json().get("data", {}).get("oppHits", [])
+
+def _grants_gov_fetch_detail(opportunity_id) -> dict:
+    resp = requests.post(
+        "https://api.grants.gov/v1/api/fetchOpportunity",
+        json={"opportunityId": opportunity_id},
+        timeout=REQUEST_TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.json().get("data", {})
+
+def _format_real_deadline(date_str: str):
+    """Parse Grants.gov's MM/DD/YYYY closeDate into (display_label, days_from_today)."""
+    d = datetime.strptime(date_str, "%m/%d/%Y")
+    days = (d.date() - datetime.now().date()).days
+    label = f"{d.strftime('%b')} {d.day}, {d.year}"
+    return label, days
+
+def _money_label(floor_str, ceiling_str) -> str:
+    try:
+        floor, ceiling = int(float(floor_str or 0)), int(float(ceiling_str or 0))
+    except (TypeError, ValueError):
+        floor, ceiling = 0, 0
+    if not ceiling:
+        return "See announcement for award details"
+    if floor:
+        return f"${floor:,} – ${ceiling:,}"
+    return f"Up to ${ceiling:,}"
+
+def _score_real_grant(hit: dict, synopsis: dict, org: dict, days_to_deadline: int) -> dict:
+    """Transparent, rule-based scoring (keyword/deadline matching) — not AI judgment.
+    Kept simple and free: no LLM call, no API key required."""
+    text = f"{hit.get('title', '')} {synopsis.get('synopsisDesc', '')} {synopsis.get('applicantEligibilityDesc', '')}".lower()
+    location_focus = (org.get("location_focus") or "").lower()
+
+    if "nationwide" in text or "national" in text:
+        geo_score, geo_note = 3, "Open nationwide — not specifically targeted to your service area, but you're eligible."
+    elif any(word in text for word in location_focus.replace("(", "").replace(")", "").replace(",", "").split() if len(word) > 3):
+        geo_score, geo_note = 5, "The opportunity's eligibility text references your service area directly."
+    else:
+        geo_score, geo_note = 3, "Geographic targeting unclear from the listing — verify eligibility directly."
+
+    focus_words = [w.lower() for w in (org.get("program_areas") or [])]
+    focus_words += (org.get("populations_served") or "").lower().split()
+    hits = sum(1 for w in focus_words if len(w) > 3 and w in text)
+    if hits >= 3:
+        pop_score, pop_note = 5, "Strong keyword overlap between this opportunity and your program areas."
+    elif hits >= 1:
+        pop_score, pop_note = 3, "Some keyword overlap with your program areas — worth a closer read."
+    else:
+        pop_score, pop_note = 2, "Little keyword overlap detected with your stated program areas."
+
+    ceiling = synopsis.get("awardCeiling")
+    if ceiling and str(ceiling).strip("0"):
+        budget_score, budget_note = 4, f"Award ceiling of ${int(float(ceiling)):,} is listed — compare against your program budget."
+    else:
+        budget_score, budget_note = 3, "No award ceiling published — check the full announcement for funding levels."
+
+    if days_to_deadline < 0:
+        time_score, time_note = 1, "This opportunity's deadline has already passed."
+    elif days_to_deadline < 14:
+        time_score, time_note = 2, f"Only {days_to_deadline} days to deadline — tight turnaround."
+    elif days_to_deadline < 30:
+        time_score, time_note = 3, f"{days_to_deadline} days to deadline — feasible but don't delay."
+    elif days_to_deadline < 60:
+        time_score, time_note = 4, f"{days_to_deadline} days to deadline — comfortable runway."
+    else:
+        time_score, time_note = 5, f"{days_to_deadline} days to deadline — plenty of time to prepare."
+
+    return {
+        "geographic_alignment": {"score": geo_score, "label": "Geographic Alignment", "explanation": geo_note},
+        "population_served": {"score": pop_score, "label": "Population Served", "explanation": pop_note},
+        "budget_fit": {"score": budget_score, "label": "Budget Fit", "explanation": budget_note, "is_highest_weight": True},
+        "timeline_feasibility": {"score": time_score, "label": "Timeline Feasibility", "explanation": time_note},
+    }
+
+def _grants_gov_opportunity_to_grant(hit: dict, org: dict) -> dict:
+    detail = _grants_gov_fetch_detail(hit["id"])
+    synopsis = detail.get("synopsis", {}) or {}
+    close_date = hit.get("closeDate") or synopsis.get("responseDate") or ""
+    deadline_label, days = _format_real_deadline(close_date) if close_date else ("See announcement", 9999)
+    scoring = _score_real_grant(hit, synopsis, org, days)
+    match_score = round(sum(v["score"] for v in scoring.values()) / len(scoring), 1)
+    return {
+        "id": f"gg-{hit['id']}", "temperature": "hot" if 0 <= days < 30 else "warm",
+        "source": "Grants.gov", "source_url": f"https://grants.gov/search-results-detail/{hit['id']}",
+        "is_real_data": True, "is_manually_added": False,
+        "funding_org": synopsis.get("agencyName") or hit.get("agency", "Unknown Agency"),
+        "program_name": hit.get("title", "Untitled Opportunity"),
+        "program_contact": synopsis.get("agencyContactEmailDesc") or synopsis.get("agencyContactName") or "See announcement for contact info",
+        "description": (synopsis.get("synopsisDesc") or "No description provided.")[:600],
+        "days_to_deadline": days, "deadline": deadline_label,
+        "eligibility": synopsis.get("applicantEligibilityDesc") or "See full announcement for eligibility criteria.",
+        "award_label": _money_label(synopsis.get("awardFloor"), synopsis.get("awardCeiling")),
+        "award_min": int(float(synopsis.get("awardFloor") or 0)), "award_max": int(float(synopsis.get("awardCeiling") or 0)),
+        "application_method": "Apply via Grants.gov", "application_url": f"https://grants.gov/search-results-detail/{hit['id']}",
+        "disqualifying_restrictions": "", "required_documents": ["See full announcement on Grants.gov for required application materials"],
+        "match_score": match_score, "retrieved_ago": "just now",
+        "scoring": scoring, "location": org.get("location_focus", "United States"),
+    }
+
+def _propublica_search(name: str) -> list:
+    resp = requests.get(
+        "https://projects.propublica.org/nonprofits/api/v2/search.json",
+        params={"q": name}, timeout=REQUEST_TIMEOUT,
+    )
+    if resp.status_code == 404:
+        return []  # ProPublica returns 404 (not 200) specifically for zero-result searches
+    resp.raise_for_status()
+    return resp.json().get("organizations", [])
+
+def _propublica_fetch_org(ein) -> dict:
+    resp = requests.get(
+        f"https://projects.propublica.org/nonprofits/api/v2/organizations/{ein}.json",
+        timeout=REQUEST_TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+def _propublica_to_archival_grant(org_summary: dict, org_detail: dict) -> dict:
+    ein = org_summary["ein"]
+    name = org_summary["name"]
+    filings = org_detail.get("filings_with_data") or []
+    latest = max(filings, key=lambda f: f.get("tax_prd") or 0) if filings else None
+
+    if latest:
+        year = str(latest.get("tax_prd") or "")[:4] or "recent"
+        revenue = latest.get("totrevenue")
+        expenses = latest.get("totfuncexpns")
+        assets = latest.get("totassetsend")
+        parts = [f"Real IRS Form 990 data for tax year {year}:"]
+        if revenue is not None:
+            parts.append(f"total revenue ${revenue:,};")
+        if expenses is not None:
+            parts.append(f"total expenses ${expenses:,};")
+        if assets is not None:
+            parts.append(f"total assets ${assets:,}.")
+        description = " ".join(parts)
+        pdf_url = latest.get("pdf_url") or ""
+    else:
+        description = "No extracted financial data is available from ProPublica for this organization yet — see the linked filings directly."
+        pdf_url = ""
+
+    return {
+        "id": f"pp-{ein}", "temperature": "less-warm",
+        "source": "IRS Form 990 (ProPublica)", "source_url": f"https://projects.propublica.org/nonprofits/organizations/{ein}",
+        "is_real_data": True, "is_manually_added": False,
+        "funding_org": name, "program_name": f"Financial Profile — {name}",
+        "program_contact": "Public 990 record — no direct contact published",
+        "description": description,
+        "days_to_deadline": 365, "deadline": "No open cycle — research only",
+        "eligibility": "Inferred from real IRS filings only — no confirmed open RFP. Verify current funding priorities directly with the organization.",
+        "award_label": "Not applicable — historical financial profile, not an award listing",
+        "award_min": 0, "award_max": 0,
+        "application_method": "No open application — relationship-building/cultivation recommended",
+        "application_url": pdf_url or f"https://projects.propublica.org/nonprofits/organizations/{ein}",
+        "disqualifying_restrictions": "Archival data only — no confirmed open RFP.",
+        "required_documents": ["N/A — relationship-building phase"],
+        "match_score": 3.0, "retrieved_ago": "just now",
+        "scoring": {
+            "geographic_alignment": {"score": 3, "label": "Geographic Alignment", "explanation": "Not determinable from 990 data alone — research the funder's stated giving areas."},
+            "population_served": {"score": 3, "label": "Population Served", "explanation": "Not determinable from 990 data alone — research the funder's stated priorities."},
+            "budget_fit": {"score": 3, "label": "Budget Fit", "explanation": "Compare your budget against the organization's real total revenue/assets above.", "is_highest_weight": True},
+            "timeline_feasibility": {"score": 1, "label": "Timeline Feasibility", "explanation": "No open cycle — this is cultivation research, not an active opportunity."},
+        },
+        "location": org_summary.get("state", "Unknown"),
+    }
+
 def estimate_box_height(text: str, chars_per_line: int = 90, line_px: int = 27, padding_px: int = 30, min_px: int = 320, max_px: int = 700) -> int:
     """Rough pixel height so a text_area fits its content without an internal scrollbar."""
     lines = 0
@@ -154,7 +338,7 @@ Sincerely,
 
 INITIAL_GRANTS = [
     {
-        "id": "1", "temperature": "hot", "source": "Philanthropy News Digest",
+        "id": "1", "temperature": "hot", "source": "Philanthropy News Digest", "is_demo": True,
         "source_url": "https://philanthropynewsdigest.org/",
         "funding_org": "The Chicago Community Trust", "program_name": "Community Impact Grant",
         "program_contact": "Maria Velasquez — Senior Program Officer, Basic Human Needs",
@@ -185,7 +369,7 @@ INITIAL_GRANTS = [
         "location": "Cook County, IL",
     },
     {
-        "id": "2", "temperature": "hot", "source": "Manual Entry", "is_manually_added": True,
+        "id": "2", "temperature": "hot", "source": "Manual Entry", "is_manually_added": True, "is_demo": True,
         "source_url": "",
         "funding_org": "Conrad N. Hilton Foundation", "program_name": "Catholic Sisters Initiative — Local Partner",
         "program_contact": "Board member referral — contact info pending",
@@ -206,7 +390,7 @@ INITIAL_GRANTS = [
         "location": "Chicago, IL",
     },
     {
-        "id": "3", "temperature": "warm", "source": "Instrumentl", "is_manually_added": False,
+        "id": "3", "temperature": "warm", "source": "Instrumentl", "is_manually_added": False, "is_demo": True,
         "source_url": "https://www.instrumentl.com/",
         "funding_org": "Polk Bros. Foundation", "program_name": "Social Services Partnership",
         "program_contact": "Daniel Park — Program Director, Strong Communities",
@@ -227,7 +411,7 @@ INITIAL_GRANTS = [
         "location": "Chicago, IL",
     },
     {
-        "id": "4", "temperature": "less-warm", "source": "Archival 990", "is_manually_added": False,
+        "id": "4", "temperature": "less-warm", "source": "Archival 990", "is_manually_added": False, "is_demo": True,
         "source_url": "https://apps.irs.gov/app/eos/",
         "funding_org": "MacArthur Foundation", "program_name": "Historical Giving — Housing & Human Services",
         "program_contact": "Public 990 Record — Contact info not published",
@@ -495,6 +679,8 @@ def show_grant_card(g: dict):
             badges = f"{icon} **{temp.upper()}**  ·  *{g['source']}*"
             if g.get("is_manually_added"):
                 badges += "  ·  📝 Manually Added"
+            if g.get("is_demo"):
+                badges += "  ·  🧪 Demo Example"
             st.markdown(badges)
             st.markdown(f"### {g['program_name']}")
             st.caption(f"**{g['funding_org']}**")
@@ -530,7 +716,8 @@ def show_grant_detail():
             st.markdown(f"## {g['program_name']}")
             sources = get_sources(g)
             source_names = " · ".join(s["name"] for s in sources)
-            st.caption(f"**{g['funding_org']}** · {temp_label(g['temperature'])} · Source: {source_names}")
+            demo_tag = " · 🧪 Demo Example" if g.get("is_demo") else ""
+            st.caption(f"**{g['funding_org']}** · {temp_label(g['temperature'])} · Source: {source_names}{demo_tag}")
 
             if len(sources) == 1:
                 if sources[0].get("url"):
@@ -632,96 +819,6 @@ def show_grant_detail():
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
-def _make_agent_grants() -> list:
-    return [
-        {
-            "id": f"ag-{random.randint(10000, 99999)}", "temperature": "hot",
-            "source": "Grants.gov", "source_url": "https://www.grants.gov/", "is_manually_added": False,
-            "funding_org": "Richard H. Driehaus Foundation", "program_name": "Housing Opportunity Grant",
-            "program_contact": "Grants Office — grants@driehausfdn.org",
-            "description": "Direct grants to Chicago organizations providing transitional and supportive housing for vulnerable adults, with emphasis on trauma-informed service models.",
-            "days_to_deadline": 18, "deadline": dl(18),
-            "eligibility": "501(c)(3) Chicago-based organization serving adults. Min. 2 years operating history. Annual budget $500K–$20M.",
-            "award_label": "$30,000 – $100,000 (one year)", "award_min": 30000, "award_max": 100000,
-            "application_method": "Online application via Driehaus Foundation portal", "application_url": "#",
-            "disqualifying_restrictions": "Does not fund religious organizations for religious purposes or capital campaigns.",
-            "required_documents": ["Narrative application (5 pages)", "Current year budget", "Board member list", "IRS determination letter"],
-            "match_score": 4.6, "retrieved_ago": "just now",
-            "scoring": {
-                "geographic_alignment": {"score": 5, "label": "Geographic Alignment", "explanation": "Chicago-only funder; geographic fit is ideal."},
-                "population_served": {"score": 5, "label": "Population Served", "explanation": "Explicitly funds trauma-informed housing for vulnerable adults."},
-                "budget_fit": {"score": 4, "label": "Budget Fit", "explanation": "Award ceiling at $100K fits budget range; one-year award manageable.", "is_highest_weight": True},
-                "timeline_feasibility": {"score": 5, "label": "Timeline Feasibility", "explanation": "18 days to deadline — achievable with existing materials."},
-            },
-            "location": "Chicago, IL",
-        },
-        {
-            "id": f"ag-{random.randint(10000, 99999)+1}", "temperature": "warm",
-            "source": "Philanthropy News Digest", "source_url": "https://philanthropynewsdigest.org/", "is_manually_added": False,
-            "funding_org": "Woods Fund Chicago", "program_name": "Community Equity Program",
-            "program_contact": "Program Staff — info@woodsfund.org",
-            "description": "Multi-year support for Chicago organizations advancing racial and economic equity through direct services and advocacy, including housing stability programs.",
-            "days_to_deadline": 90, "deadline": dl(90),
-            "eligibility": "Chicago-based 501(c)(3). Focus areas include housing, economic mobility, and community health.",
-            "award_label": "$50,000 – $150,000 over 2 years", "award_min": 50000, "award_max": 150000,
-            "application_method": "Letter of Inquiry submission via online portal", "application_url": "#",
-            "disqualifying_restrictions": "Does not fund direct religious programming or individual scholarships.",
-            "required_documents": ["Letter of Inquiry (2 pages)", "Organizational overview", "Prior year financials"],
-            "match_score": 3.9, "retrieved_ago": "just now",
-            "scoring": {
-                "geographic_alignment": {"score": 5, "label": "Geographic Alignment", "explanation": "Chicago-only funder aligned with Deborah's Place service area."},
-                "population_served": {"score": 4, "label": "Population Served", "explanation": "Housing and economic equity focus aligns well with mission."},
-                "budget_fit": {"score": 3, "label": "Budget Fit", "explanation": "Two-year award is in range; LOI stage keeps near-term investment low.", "is_highest_weight": True},
-                "timeline_feasibility": {"score": 4, "label": "Timeline Feasibility", "explanation": "90-day window gives adequate runway to prepare a strong LOI."},
-            },
-            "location": "Chicago, IL",
-        },
-        {
-            "id": f"ag-{random.randint(10000, 99999)+2}", "temperature": "warm",
-            "source": "GrantStation", "source_url": "https://grantstation.com/", "is_manually_added": False,
-            "funding_org": "Steans Family Foundation", "program_name": "Neighborhood Stability Fund",
-            "program_contact": "Grants Committee — info@steansfamilyfoundation.org",
-            "description": "Support for Chicago nonprofits stabilizing housing and building economic resilience in North Lawndale and surrounding communities.",
-            "days_to_deadline": 45, "deadline": dl(45),
-            "eligibility": "Chicago-based 501(c)(3) working in North Lawndale or adjacent communities. Focus on housing, workforce, or education.",
-            "award_label": "$20,000 – $75,000 (one year)", "award_min": 20000, "award_max": 75000,
-            "application_method": "Online application via GrantStation-listed portal", "application_url": "#",
-            "disqualifying_restrictions": "Does not fund organizations outside of designated Chicago neighborhoods.",
-            "required_documents": ["Application narrative (4 pages)", "Current year budget", "IRS determination letter"],
-            "match_score": 3.8, "retrieved_ago": "just now",
-            "scoring": {
-                "geographic_alignment": {"score": 4, "label": "Geographic Alignment", "explanation": "Neighborhood-specific focus; verify Deborah's Place program sites fall within target area."},
-                "population_served": {"score": 4, "label": "Population Served", "explanation": "Housing stability focus aligns with supportive housing mission."},
-                "budget_fit": {"score": 4, "label": "Budget Fit", "explanation": "One-year award size fits smaller program-specific budgets.", "is_highest_weight": True},
-                "timeline_feasibility": {"score": 4, "label": "Timeline Feasibility", "explanation": "45-day window is comfortable for a standard application."},
-            },
-            "location": "Chicago, IL",
-        },
-    ]
-
-def _make_archival_grant() -> dict:
-    return {
-        "id": f"arc-{random.randint(10000, 99999)}", "temperature": "less-warm",
-        "source": "Archival 990", "source_url": "https://apps.irs.gov/app/eos/", "is_manually_added": False,
-        "funding_org": "Wintrust Community Advantage", "program_name": "Affordable Housing Fund — Historical Data",
-        "program_contact": "Public 990 Record — Contact info not published",
-        "description": "Historical CRA-qualified grant-making to Chicago affordable housing providers identified from 2020–2023 IRS Form 990 filings. No active RFP confirmed.",
-        "days_to_deadline": 365, "deadline": dl(365),
-        "eligibility": "CRA-qualified affordable housing programs. Inferred from historical data. Verify before outreach.",
-        "award_label": "$25,000 – $100,000 (historical median)", "award_min": 25000, "award_max": 100000,
-        "application_method": "CRA officer outreach — relationship building recommended", "application_url": "#",
-        "disqualifying_restrictions": "Archival data only — current funding availability unconfirmed.",
-        "required_documents": ["N/A — relationship-building phase"],
-        "match_score": 3.2, "retrieved_ago": "just now",
-        "scoring": {
-            "geographic_alignment": {"score": 5, "label": "Geographic Alignment", "explanation": "Chicago metro CRA lender; geographic fit ideal."},
-            "population_served": {"score": 3, "label": "Population Served", "explanation": "General affordable housing focus; women-specific programs within scope."},
-            "budget_fit": {"score": 3, "label": "Budget Fit", "explanation": "Historical median award fits budget; CRA funds typically smaller.", "is_highest_weight": True},
-            "timeline_feasibility": {"score": 2, "label": "Timeline Feasibility", "explanation": "No active RFP. Relationship cultivation required."},
-        },
-        "location": "Chicago, IL",
-    }
-
 def show_dashboard():
     org = st.session_state.org_profile
     st.markdown("# Grant Pipeline")
@@ -752,48 +849,72 @@ def show_dashboard():
         st.session_state.sort_by = sort_by
 
     with cc2:
-        if st.button("🗄️ Search Archival (990)", use_container_width=True):
-            existing_keys = {g["funding_org"] + g["program_name"] for g in st.session_state.grants}
-            new_arc = _make_archival_grant()
-            with st.status("Scanning 990 filings...", expanded=True) as status:
-                st.write("Searching IRS Form 990 records...")
-                time.sleep(1.2)
-                st.write("Identifying historical giving patterns...")
-                time.sleep(1.2)
-                st.write("Scoring and ranking archival leads...")
-                time.sleep(0.8)
-                status.update(label="Archival scan complete!", state="complete")
-            if new_arc["funding_org"] + new_arc["program_name"] not in existing_keys:
-                st.session_state.grants.append(new_arc)
-                alert = {"id": f"a{random.randint(100,999)}", "grant_name": "Archival scan complete", "funding_org": "Wintrust Community Advantage added to archival sources", "sent_ago": "just now", "recipients": len(st.session_state.users)}
-                st.session_state.alert_log.insert(0, alert)
-                st.session_state.unread_alerts += 1
-            st.rerun()
+        with st.popover("🗄️ Search Real 990 Data", use_container_width=True):
+            st.caption("Look up a real nonprofit or foundation's actual filed IRS Form 990 financials (revenue, expenses, assets) for cultivation research. This is historical financial data, not a confirmed open RFP — foundations don't file those with the IRS.")
+            foundation_query = st.text_input("Foundation name", key="archival_search_name", placeholder="e.g. Chicago Community Trust")
+            if st.button("Search ProPublica", key="run_990_search"):
+                if not foundation_query.strip():
+                    st.warning("Enter a foundation name first.")
+                else:
+                    try:
+                        new_arc = None
+                        with st.status(f"Searching for '{foundation_query}'...", expanded=True) as status:
+                            st.write("Querying ProPublica Nonprofit Explorer...")
+                            matches = _propublica_search(foundation_query.strip())
+                            if matches:
+                                best = matches[0]
+                                st.write(f"Found: {best['name']} (EIN {best['strein']})")
+                                st.write("Pulling filed IRS Form 990 financials...")
+                                detail = _propublica_fetch_org(best["ein"])
+                                new_arc = _propublica_to_archival_grant(best, detail)
+                                status.update(label="Lookup complete!", state="complete")
+                            else:
+                                status.update(label=f"No organizations found matching '{foundation_query}'.", state="error")
+                        if new_arc:
+                            existing_keys = {g["funding_org"] + g["program_name"] for g in st.session_state.grants}
+                            if new_arc["funding_org"] + new_arc["program_name"] not in existing_keys:
+                                st.session_state.grants.append(new_arc)
+                                alert = {"id": f"a{random.randint(100,999)}", "grant_name": "Real 990 lookup complete", "funding_org": f"{new_arc['funding_org']} added to archival research", "sent_ago": "just now", "recipients": len(st.session_state.users)}
+                                st.session_state.alert_log.insert(0, alert)
+                                st.session_state.unread_alerts += 1
+                            st.rerun()
+                    except requests.RequestException:
+                        st.error("Couldn't reach ProPublica's Nonprofit Explorer — check your connection and try again.")
 
     with cc3:
-        if st.button("▶ Run Grant Search", use_container_width=True, type="primary"):
-            existing_keys = {g["funding_org"] + g["program_name"] for g in st.session_state.grants}
-            new_grants = _make_agent_grants()
-            with st.status("Running grant search...", expanded=True) as status:
-                st.write("🔵 Scanning sources: Grants.gov, Instrumentl, PND, GrantStation...")
-                time.sleep(1.2)
-                st.write("🟣 Matching to organization profile...")
-                time.sleep(1.2)
-                st.write("🟢 Ranking and filtering results...")
-                time.sleep(1.2)
-                st.write("✅ Finalizing new leads...")
-                time.sleep(0.4)
-                status.update(label="Grant search complete! New leads added.", state="complete")
-            added = 0
-            for g in new_grants:
-                if g["funding_org"] + g["program_name"] not in existing_keys:
-                    st.session_state.grants.append(g)
-                    added += 1
-            if added:
-                alert = {"id": f"a{random.randint(100,999)}", "grant_name": f"Agent found {added} new lead{'s' if added > 1 else ''}", "funding_org": "Driehaus Foundation · Woods Fund Chicago · Steans Family Foundation", "sent_ago": "just now", "recipients": len(st.session_state.users)}
-                st.session_state.alert_log.insert(0, alert)
-                st.session_state.unread_alerts += 1
-            st.rerun()
+        with st.popover("▶ Run Grant Search", use_container_width=True):
+            st.caption("Searches real, currently-open opportunities on Grants.gov (federal/public grants) matched to your organization profile.")
+            default_keyword = (org.get("program_areas") or [org.get("name", "nonprofit")])[0]
+            keyword = st.text_input("Search keyword", value=default_keyword, key="grants_gov_keyword")
+            if st.button("Search Grants.gov", key="run_grants_gov_search", type="primary"):
+                try:
+                    new_grants = []
+                    with st.status(f"Searching Grants.gov for '{keyword}'...", expanded=True) as status:
+                        st.write("Querying Grants.gov Search2 API...")
+                        hits = _grants_gov_search(keyword, rows=5)
+                        if hits:
+                            st.write(f"Found {len(hits)} open opportunities — pulling full details...")
+                            for hit in hits:
+                                try:
+                                    new_grants.append(_grants_gov_opportunity_to_grant(hit, org))
+                                except Exception:
+                                    continue  # skip a single bad record rather than failing the whole search
+                            status.update(label="Grant search complete!", state="complete")
+                        else:
+                            status.update(label=f"No open opportunities found for '{keyword}'.", state="error")
+                    existing_keys = {g["funding_org"] + g["program_name"] for g in st.session_state.grants}
+                    added = 0
+                    for g in new_grants:
+                        if g["funding_org"] + g["program_name"] not in existing_keys:
+                            st.session_state.grants.append(g)
+                            added += 1
+                    if added:
+                        alert = {"id": f"a{random.randint(100,999)}", "grant_name": f"Real search found {added} new lead{'s' if added > 1 else ''}", "funding_org": f"Grants.gov: '{keyword}'", "sent_ago": "just now", "recipients": len(st.session_state.users)}
+                        st.session_state.alert_log.insert(0, alert)
+                        st.session_state.unread_alerts += 1
+                    st.rerun()
+                except requests.RequestException:
+                    st.error("Couldn't reach Grants.gov — check your connection and try again.")
 
     with cc4:
         if st.button("+ Add Grant", use_container_width=True):
@@ -826,7 +947,7 @@ def show_dashboard():
             for g in hot:
                 show_grant_card(g)
         else:
-            st.info("No hot leads right now. Click **▶ Run Grant Search** to find new opportunities.")
+            st.info("No hot leads right now. Open **▶ Run Grant Search** above to pull real opportunities from Grants.gov.")
 
     with tab_warm:
         st.caption("Warm leads queued for the next grant cycle. Funders likely to open applications soon.")
@@ -834,7 +955,7 @@ def show_dashboard():
             for g in warm:
                 show_grant_card(g)
         else:
-            st.info("No warm leads queued. Click **▶ Run Grant Search** to surface upcoming opportunities.")
+            st.info("No warm leads queued. Open **▶ Run Grant Search** above to surface upcoming opportunities.")
 
     # Archival
     st.divider()
@@ -844,7 +965,7 @@ def show_dashboard():
             for g in archival:
                 show_grant_card(g)
         else:
-            st.info("No archival sources yet. Click **🗄️ Search Archival (990)** to scan 990 filings.")
+            st.info("No archival sources yet. Open **🗄️ Search Real 990 Data** above and search a real foundation by name.")
 
     # Cold leads notice
     if cold:
