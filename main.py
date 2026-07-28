@@ -13,7 +13,7 @@ st.set_page_config(
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def dl(days: int) -> str:
-    return (datetime.now() + timedelta(days=days)).strftime("%b %-d, %Y")
+    return (datetime.now() + timedelta(days=days)).strftime("%b %#d, %Y")
 
 def is_cold_lead(g: dict) -> bool:
     if g.get("is_manually_added"):
@@ -46,11 +46,115 @@ def stars(score: float) -> str:
 def temp_label(temp: str) -> str:
     return {"hot": "🔴 Hot", "warm": "🟡 Warm", "less-warm": "⚪ Archival"}.get(temp, temp)
 
+# Above this many sources, show a dropdown selector instead of a row of buttons.
+MULTI_SOURCE_DROPDOWN_THRESHOLD = 3
+
+def get_sources(g: dict) -> list:
+    """
+    Normalize a grant's source(s) into a list of
+    {"name", "url", "required_documents"} dicts.
+    Falls back to the single legacy source/source_url/required_documents
+    fields when a grant doesn't define an explicit "sources" list.
+    """
+    if g.get("sources"):
+        return g["sources"]
+    return [{
+        "name": g.get("source", "Unknown"),
+        "url": g.get("source_url", ""),
+        "required_documents": g.get("required_documents", []),
+    }]
+
+def analyze_required_documents(sources: list):
+    """
+    Union required documents across all sources for a grant, and flag any
+    document that isn't mentioned by every source as a conflict — surfaced
+    separately so staff know to verify it directly with the funder.
+
+    Returns (all_docs: sorted list, conflicts: {doc: {"mentioned_by": [...], "not_mentioned_by": [...]}})
+    """
+    by_source = {s["name"]: set(s.get("required_documents") or []) for s in sources}
+    all_docs = sorted(set.union(*by_source.values())) if by_source else []
+    conflicts = {}
+    for doc in all_docs:
+        mentioned_by = [name for name, docs in by_source.items() if doc in docs]
+        not_mentioned_by = [name for name in by_source if name not in mentioned_by]
+        if not_mentioned_by:
+            conflicts[doc] = {"mentioned_by": mentioned_by, "not_mentioned_by": not_mentioned_by}
+    return all_docs, conflicts
+
+def estimate_box_height(text: str, chars_per_line: int = 90, line_px: int = 27, padding_px: int = 30, min_px: int = 320, max_px: int = 700) -> int:
+    """Rough pixel height so a text_area fits its content without an internal scrollbar."""
+    lines = 0
+    for line in text.split("\n"):
+        lines += max(1, -(-len(line) // chars_per_line))  # ceil division; blank lines still count as 1
+    return max(min_px, min(max_px, lines * line_px + padding_px))
+
+def _contact_greeting(program_contact: str) -> str:
+    """Best-effort salutation name from a 'Name — Title' contact string."""
+    lowered = program_contact.lower()
+    if "—" in program_contact and not any(
+        phrase in lowered for phrase in ["not published", "pending", "public 990 record"]
+    ):
+        return program_contact.split("—")[0].strip()
+    return "Grants Team"
+
+def generate_email_draft(g: dict, org: dict, extra_info: str = "") -> str:
+    """Draft a copy-paste-ready inquiry email: org intro, interest + fit case,
+    a direct fit question, then a close asking about required documents
+    (surfacing any cross-source conflicts so the funder can clarify)."""
+    sources = get_sources(g)
+    _, conflicts = analyze_required_documents(sources)
+    source_names = " and ".join(s["name"] for s in sources)
+    contact_name = _contact_greeting(g.get("program_contact", ""))
+
+    fit_reasons = [
+        val["explanation"] for val in g.get("scoring", {}).values() if val.get("score", 0) >= 4
+    ]
+    fit_paragraph = " ".join(fit_reasons[:2]) or "Our mission and program focus closely align with your funding priorities."
+
+    intro = f"My name is [Your Name], [Your Title] at {org['name']}. {org['mission']}"
+    if org.get("funding_needs"):
+        intro += f" We are currently seeking support for {org['funding_needs'][0].lower()}{org['funding_needs'][1:]}"
+    if extra_info.strip():
+        intro += f" {extra_info.strip()}"
+
+    focus = ", ".join(org.get("program_areas", [])) or org.get("populations_served", "our mission")
+
+    closing_ask = "If we are a good fit, we were curious about the required documents and information needed to submit an application."
+    if conflicts:
+        conflict_list = "; ".join(conflicts.keys())
+        closing_ask += (
+            f" We noticed the listed requirements differ slightly across sources (specifically: {conflict_list}) "
+            "and would appreciate your guidance on the complete, current checklist."
+        )
+
+    return f"""Subject: Inquiry Regarding {g['program_name']} — {org['name']}
+
+Dear {contact_name},
+
+{intro}
+
+We recently learned about your {g['program_name']} opportunity through {source_names} and are very interested in applying. {fit_paragraph}
+
+Given our focus on {focus}, we believe {org['name']} would be a strong fit for this grant. We would welcome the chance to share more about our program and to hear your thoughts on whether we might be a good fit for this opportunity.
+
+{closing_ask}
+
+Thank you very much for your time and consideration. We look forward to hearing from you.
+
+Sincerely,
+[Your Name]
+[Your Title]
+{org['name']}
+[Your Email]
+"""
+
 # ── Initial data ──────────────────────────────────────────────────────────────
 
 INITIAL_GRANTS = [
     {
         "id": "1", "temperature": "hot", "source": "Philanthropy News Digest",
+        "source_url": "https://philanthropynewsdigest.org/",
         "funding_org": "The Chicago Community Trust", "program_name": "Community Impact Grant",
         "program_contact": "Maria Velasquez — Senior Program Officer, Basic Human Needs",
         "description": "Unrestricted operating support for Chicago nonprofits delivering direct services to populations facing housing instability and economic hardship.",
@@ -60,6 +164,16 @@ INITIAL_GRANTS = [
         "application_method": "Online portal via CCT Grantee Hub", "application_url": "#",
         "disqualifying_restrictions": "Does not fund capital campaigns, endowments, or sectarian religious activities.",
         "required_documents": ["Organizational budget (current FY)", "Most recent audited financials", "Board roster", "Program logic model", "IRS determination letter"],
+        "sources": [
+            {
+                "name": "Philanthropy News Digest", "url": "https://philanthropynewsdigest.org/",
+                "required_documents": ["Organizational budget (current FY)", "Most recent audited financials", "Board roster", "Program logic model", "IRS determination letter"],
+            },
+            {
+                "name": "GrantStation", "url": "https://grantstation.com/",
+                "required_documents": ["Organizational budget (current FY)", "Board roster", "IRS determination letter", "Letter of support from a partner agency"],
+            },
+        ],
         "match_score": 4.8, "retrieved_ago": "23 hours ago", "is_manually_added": False,
         "scoring": {
             "geographic_alignment": {"score": 5, "label": "Geographic Alignment", "explanation": "Chicago/Cook County is the funder's exclusive service area — perfect match for Deborah's Place."},
@@ -71,6 +185,7 @@ INITIAL_GRANTS = [
     },
     {
         "id": "2", "temperature": "hot", "source": "Manual Entry", "is_manually_added": True,
+        "source_url": "",
         "funding_org": "Conrad N. Hilton Foundation", "program_name": "Catholic Sisters Initiative — Local Partner",
         "program_contact": "Board member referral — contact info pending",
         "description": "Lead from board member — funder considering Chicago-area expansion for women's housing services. Requires concept paper by end of quarter.",
@@ -91,6 +206,7 @@ INITIAL_GRANTS = [
     },
     {
         "id": "3", "temperature": "warm", "source": "Instrumentl", "is_manually_added": False,
+        "source_url": "https://www.instrumentl.com/",
         "funding_org": "Polk Bros. Foundation", "program_name": "Social Services Partnership",
         "program_contact": "Daniel Park — Program Director, Strong Communities",
         "description": "Multi-year general operating and program support for Chicago organizations addressing the root causes of poverty.",
@@ -111,6 +227,7 @@ INITIAL_GRANTS = [
     },
     {
         "id": "4", "temperature": "less-warm", "source": "Archival 990", "is_manually_added": False,
+        "source_url": "https://apps.irs.gov/app/eos/",
         "funding_org": "MacArthur Foundation", "program_name": "Historical Giving — Housing & Human Services",
         "program_contact": "Public 990 Record — Contact info not published",
         "description": "Historical pattern of giving to Chicago housing organizations identified from 2021–2023 IRS Form 990 filings. No active RFP at this time; relationship-building recommended.",
@@ -410,7 +527,28 @@ def show_grant_detail():
         hcol, xcol = st.columns([5, 1])
         with hcol:
             st.markdown(f"## {g['program_name']}")
-            st.caption(f"**{g['funding_org']}** · {temp_label(g['temperature'])} · Source: {g['source']}")
+            sources = get_sources(g)
+            source_names = " · ".join(s["name"] for s in sources)
+            st.caption(f"**{g['funding_org']}** · {temp_label(g['temperature'])} · Source: {source_names}")
+
+            if len(sources) == 1:
+                if sources[0].get("url"):
+                    st.link_button(f"🔗 View on {sources[0]['name']}", sources[0]["url"])
+            elif len(sources) <= MULTI_SOURCE_DROPDOWN_THRESHOLD:
+                link_cols = st.columns(len(sources))
+                for col, s in zip(link_cols, sources):
+                    with col:
+                        if s.get("url"):
+                            st.link_button(f"🔗 {s['name']}", s["url"], use_container_width=True)
+            else:
+                chosen_name = st.selectbox(
+                    "Found on multiple sources — view listing:",
+                    [s["name"] for s in sources],
+                    key=f"src_sel_{g['id']}",
+                )
+                chosen = next(s for s in sources if s["name"] == chosen_name)
+                if chosen.get("url"):
+                    st.link_button(f"🔗 View on {chosen_name}", chosen["url"])
         with xcol:
             if st.button("✕ Close", key="close_detail"):
                 st.session_state.selected_grant_id = None
@@ -452,8 +590,43 @@ def show_grant_detail():
 
         st.divider()
         st.markdown("**Required Documents**")
-        for doc in g["required_documents"]:
-            st.write(f"• {doc}")
+        all_docs, conflicts = analyze_required_documents(sources)
+        for doc in all_docs:
+            flag = " ⚠️" if doc in conflicts else ""
+            st.write(f"• {doc}{flag}")
+
+        if conflicts:
+            st.divider()
+            st.markdown("**⚠️ Conflicting Requirements Across Sources**")
+            st.caption("These items are mentioned by some sources but not others — verify directly with the funder before finalizing your checklist.")
+            for doc, info in conflicts.items():
+                mentioned = ", ".join(info["mentioned_by"])
+                missing = ", ".join(info["not_mentioned_by"])
+                st.warning(f"**{doc}** — listed by {mentioned}; not mentioned by {missing}")
+
+        st.divider()
+        st.markdown("**✉️ Draft Inquiry Email**")
+        caption = "Ready to copy and send. Introduces your organization, shows interest, makes the case for fit, then asks about required documents."
+        if conflicts:
+            caption += " Since sources disagree on requirements above, it also asks the funder to confirm the full checklist."
+        st.caption(caption)
+
+        with st.expander("✉️ Draft Inquiry Email", expanded=True):
+            extra_info = st.text_area(
+                "Add more about your organization to weave into the draft (optional)",
+                key=f"email_extra_{g['id']}", height=80,
+                placeholder="e.g. recent program outcomes, specific alignment notes...",
+            )
+            draft = generate_email_draft(g, st.session_state.org_profile, extra_info)
+            st.markdown(
+                "<style>.st-key-email_draft_box textarea { line-height: 1.5 !important; font-family: inherit !important; }</style>",
+                unsafe_allow_html=True,
+            )
+            st.text_area(
+                "Email draft", value=draft, height=estimate_box_height(draft),
+                key="email_draft_box", label_visibility="collapsed",
+            )
+            st.caption("Click inside, select all (Ctrl+A / Cmd+A), and copy — fill in the bracketed placeholders before sending. GrantScout does not send emails automatically.")
         st.divider()
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -462,7 +635,7 @@ def _make_agent_grants() -> list:
     return [
         {
             "id": f"ag-{random.randint(10000, 99999)}", "temperature": "hot",
-            "source": "Grants.gov", "is_manually_added": False,
+            "source": "Grants.gov", "source_url": "https://www.grants.gov/", "is_manually_added": False,
             "funding_org": "Richard H. Driehaus Foundation", "program_name": "Housing Opportunity Grant",
             "program_contact": "Grants Office — grants@driehausfdn.org",
             "description": "Direct grants to Chicago organizations providing transitional and supportive housing for vulnerable adults, with emphasis on trauma-informed service models.",
@@ -483,7 +656,7 @@ def _make_agent_grants() -> list:
         },
         {
             "id": f"ag-{random.randint(10000, 99999)+1}", "temperature": "warm",
-            "source": "Philanthropy News Digest", "is_manually_added": False,
+            "source": "Philanthropy News Digest", "source_url": "https://philanthropynewsdigest.org/", "is_manually_added": False,
             "funding_org": "Woods Fund Chicago", "program_name": "Community Equity Program",
             "program_contact": "Program Staff — info@woodsfund.org",
             "description": "Multi-year support for Chicago organizations advancing racial and economic equity through direct services and advocacy, including housing stability programs.",
@@ -502,12 +675,33 @@ def _make_agent_grants() -> list:
             },
             "location": "Chicago, IL",
         },
+        {
+            "id": f"ag-{random.randint(10000, 99999)+2}", "temperature": "warm",
+            "source": "GrantStation", "source_url": "https://grantstation.com/", "is_manually_added": False,
+            "funding_org": "Steans Family Foundation", "program_name": "Neighborhood Stability Fund",
+            "program_contact": "Grants Committee — info@steansfamilyfoundation.org",
+            "description": "Support for Chicago nonprofits stabilizing housing and building economic resilience in North Lawndale and surrounding communities.",
+            "days_to_deadline": 45, "deadline": dl(45),
+            "eligibility": "Chicago-based 501(c)(3) working in North Lawndale or adjacent communities. Focus on housing, workforce, or education.",
+            "award_label": "$20,000 – $75,000 (one year)", "award_min": 20000, "award_max": 75000,
+            "application_method": "Online application via GrantStation-listed portal", "application_url": "#",
+            "disqualifying_restrictions": "Does not fund organizations outside of designated Chicago neighborhoods.",
+            "required_documents": ["Application narrative (4 pages)", "Current year budget", "IRS determination letter"],
+            "match_score": 3.8, "retrieved_ago": "just now",
+            "scoring": {
+                "geographic_alignment": {"score": 4, "label": "Geographic Alignment", "explanation": "Neighborhood-specific focus; verify Deborah's Place program sites fall within target area."},
+                "population_served": {"score": 4, "label": "Population Served", "explanation": "Housing stability focus aligns with supportive housing mission."},
+                "budget_fit": {"score": 4, "label": "Budget Fit", "explanation": "One-year award size fits smaller program-specific budgets.", "is_highest_weight": True},
+                "timeline_feasibility": {"score": 4, "label": "Timeline Feasibility", "explanation": "45-day window is comfortable for a standard application."},
+            },
+            "location": "Chicago, IL",
+        },
     ]
 
 def _make_archival_grant() -> dict:
     return {
         "id": f"arc-{random.randint(10000, 99999)}", "temperature": "less-warm",
-        "source": "Archival 990", "is_manually_added": False,
+        "source": "Archival 990", "source_url": "https://apps.irs.gov/app/eos/", "is_manually_added": False,
         "funding_org": "Wintrust Community Advantage", "program_name": "Affordable Housing Fund — Historical Data",
         "program_contact": "Public 990 Record — Contact info not published",
         "description": "Historical CRA-qualified grant-making to Chicago affordable housing providers identified from 2020–2023 IRS Form 990 filings. No active RFP confirmed.",
@@ -580,7 +774,7 @@ def show_dashboard():
             existing_keys = {g["funding_org"] + g["program_name"] for g in st.session_state.grants}
             new_grants = _make_agent_grants()
             with st.status("Running grant search...", expanded=True) as status:
-                st.write("🔵 Scanning sources: Grants.gov, Instrumentl, PND...")
+                st.write("🔵 Scanning sources: Grants.gov, Instrumentl, PND, GrantStation...")
                 time.sleep(1.2)
                 st.write("🟣 Matching to organization profile...")
                 time.sleep(1.2)
@@ -595,7 +789,7 @@ def show_dashboard():
                     st.session_state.grants.append(g)
                     added += 1
             if added:
-                alert = {"id": f"a{random.randint(100,999)}", "grant_name": f"Agent found {added} new lead{'s' if added > 1 else ''}", "funding_org": "Driehaus Foundation · Woods Fund Chicago", "sent_ago": "just now", "recipients": len(st.session_state.users)}
+                alert = {"id": f"a{random.randint(100,999)}", "grant_name": f"Agent found {added} new lead{'s' if added > 1 else ''}", "funding_org": "Driehaus Foundation · Woods Fund Chicago · Steans Family Foundation", "sent_ago": "just now", "recipients": len(st.session_state.users)}
                 st.session_state.alert_log.insert(0, alert)
                 st.session_state.unread_alerts += 1
             st.rerun()
@@ -710,7 +904,8 @@ def show_add_grant():
             deadline_str = st.text_input("Deadline *", placeholder="e.g. Aug 15, 2026")
             award_min = st.number_input("Award Min ($)", min_value=0, value=0, step=5000)
         with c2:
-            source = st.selectbox("Source", ["Manual Entry", "Philanthropy News Digest", "Instrumentl", "Grants.gov", "Zeffy", "Archival 990"])
+            source = st.selectbox("Source", ["Manual Entry", "Philanthropy News Digest", "Instrumentl", "Grants.gov", "GrantStation", "Zeffy", "Archival 990"])
+            source_url = st.text_input("Source URL", placeholder="https://... (where you found this grant)")
             application_method = st.text_input("Application Method", placeholder="e.g. Online portal")
             program_contact = st.text_input("Program Contact")
             award_max = st.number_input("Award Max ($)", min_value=0, value=50000, step=5000)
@@ -728,7 +923,7 @@ def show_add_grant():
         else:
             st.session_state.grants.append({
                 "id": f"m-{random.randint(1000, 9999)}", "temperature": temperature,
-                "source": source, "is_manually_added": True,
+                "source": source, "source_url": source_url, "is_manually_added": True,
                 "funding_org": funding_org, "program_name": program_name,
                 "program_contact": program_contact, "description": description,
                 "days_to_deadline": 30, "deadline": deadline_str,
