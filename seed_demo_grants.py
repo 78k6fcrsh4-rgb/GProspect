@@ -39,7 +39,8 @@ FIELDNAMES = [
 ]
 
 def days_from_now(n):
-    return (TODAY + timedelta(days=n)).strftime("%B %d, %Y").replace(" 0", " ")
+    d = TODAY + timedelta(days=n)
+    return f"{d.strftime('%B')} {d.day}, {d.year}"
 
 def make_grant(rank, funder, program, deadline_days, award_min, award_max,
                score, geo, pop, budget, timeline,
