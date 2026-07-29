@@ -247,10 +247,13 @@ def _grants_gov_opportunity_to_grant(hit: dict, org: dict) -> dict:
         "scoring": scoring, "location": org.get("location_focus", "United States"),
     }
 
-def _propublica_search(name: str) -> list:
+def _propublica_search(name: str, state: str = "") -> list:
+    params = {"q": name}
+    if state:
+        params["state[id]"] = state
     resp = requests.get(
         "https://projects.propublica.org/nonprofits/api/v2/search.json",
-        params={"q": name}, timeout=REQUEST_TIMEOUT,
+        params=params, timeout=REQUEST_TIMEOUT,
     )
     if resp.status_code == 404:
         return []  # ProPublica returns 404 (not 200) specifically for zero-result searches
@@ -265,11 +268,14 @@ def _propublica_fetch_org(ein) -> dict:
     resp.raise_for_status()
     return resp.json()
 
+def _latest_propublica_filing(org_detail: dict):
+    filings = org_detail.get("filings_with_data") or []
+    return max(filings, key=lambda f: f.get("tax_prd") or 0) if filings else None
+
 def _propublica_to_archival_grant(org_summary: dict, org_detail: dict) -> dict:
     ein = org_summary["ein"]
     name = org_summary["name"]
-    filings = org_detail.get("filings_with_data") or []
-    latest = max(filings, key=lambda f: f.get("tax_prd") or 0) if filings else None
+    latest = _latest_propublica_filing(org_detail)
 
     if latest:
         year = str(latest.get("tax_prd") or "")[:4] or "recent"
@@ -313,6 +319,31 @@ def _propublica_to_archival_grant(org_summary: dict, org_detail: dict) -> dict:
         },
         "location": org_summary.get("state", "Unknown"),
     }
+
+def _propublica_discover_private_foundations(keyword: str, state: str = "", max_checked: int = 15, max_results: int = 8, on_progress=None):
+    """Search by name/keyword (+ optional state), keep only organizations whose most
+    recent filing is a Form 990-PF (formtype 2) — the return only private foundations
+    file, unlike public charities (990/990-EZ). This is a real, structural signal, not
+    a heuristic: it identifies WHAT an org legally is, not whether it funds a given cause
+    (no free data source tags foundations by giving interest).
+
+    Returns (results, raw_hit_count) so callers can distinguish "no matches at all"
+    from "matches existed but none were private foundations"."""
+    hits = _propublica_search(keyword, state)
+    results = []
+    for i, hit in enumerate(hits[:max_checked], start=1):
+        if on_progress:
+            on_progress(i, min(len(hits), max_checked), hit["name"])
+        try:
+            detail = _propublica_fetch_org(hit["ein"])
+        except requests.RequestException:
+            continue
+        latest = _latest_propublica_filing(detail)
+        if latest and latest.get("formtype") == 2:
+            results.append(_propublica_to_archival_grant(hit, detail))
+            if len(results) >= max_results:
+                break
+    return results, len(hits)
 
 def estimate_box_height(text: str, chars_per_line: int = 90, line_px: int = 27, padding_px: int = 30, min_px: int = 320, max_px: int = 700) -> int:
     """Rough pixel height so a text_area fits its content without an internal scrollbar."""
@@ -494,6 +525,7 @@ INITIAL_ORG = {
     "location_focus": "Chicago, IL (Cook County)",
     "budget_range": "$5M – $10M",
     "populations_served": "Adult women (18+) experiencing chronic homelessness, including survivors of trauma, women with disabilities, and women in recovery.",
+    "existing_funders": [],
 }
 
 INITIAL_ALERTS = [
@@ -538,6 +570,8 @@ def init_state():
         "selected_grant_id": None,
         "sort_by": "Match Score: High to Low",
         "show_alert_log": False,
+        "discovery_results": [],
+        "discovery_query": "",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -839,7 +873,7 @@ def show_grant_detail():
                 missing = ", ".join(info["not_mentioned_by"])
                 st.warning(f"**{doc}** — listed by {mentioned}; not mentioned by {missing}")
 
-        if len(sources) > 1:
+        if len(sources) > 1 or g.get("source") == "IRS Form 990 (ProPublica)":
             st.divider()
             st.markdown("**✉️ Draft Inquiry Email**")
             caption = "Ready to copy and send. Introduces your organization, shows interest, makes the case for fit, then asks about required documents."
@@ -897,37 +931,73 @@ def show_dashboard():
         st.session_state.sort_by = sort_by
 
     with cc2:
-        with st.popover("🗄️ Search Real 990 Data", use_container_width=True):
-            st.caption("Look up a real nonprofit or foundation's actual filed IRS Form 990 financials (revenue, expenses, assets) for cultivation research. This is historical financial data, not a confirmed open RFP — foundations don't file those with the IRS.")
-            foundation_query = st.text_input("Foundation name", key="archival_search_name", placeholder="e.g. Chicago Community Trust")
+        with st.popover("🗄️ Find Private Foundations", use_container_width=True):
+            st.caption(
+                "Search real IRS Form 990 data. An exact foundation name works like a lookup. "
+                "A broader term (a surname, \"family foundation,\" a neighborhood) browses real candidates instead — "
+                "matched by name/keyword only, not by cause area (no free data tags foundations by giving interest). "
+                "Results are filtered to organizations that actually file Form 990-PF — the return only **private "
+                "foundations** file, unlike public charities. Anyone already on your Existing Funders list "
+                "(Organization Profile) is automatically excluded, so you only see new prospects."
+            )
+            loc = (org.get("location_focus") or "").upper()
+            default_state = "IL" if any(t in loc for t in ("ILLINOIS", "CHICAGO", ", IL")) else ""
+            fcol1, fcol2 = st.columns([3, 1])
+            with fcol1:
+                foundation_query = st.text_input("Foundation name or keyword", key="archival_search_name", placeholder="e.g. Chicago Community Trust, or \"family foundation\"")
+            with fcol2:
+                state_code = st.text_input("State", key="archival_search_state", value=default_state, max_chars=2, placeholder="IL")
             if st.button("Search ProPublica", key="run_990_search"):
                 if not foundation_query.strip():
-                    st.warning("Enter a foundation name first.")
+                    st.warning("Enter a foundation name or keyword first.")
                 else:
                     try:
-                        new_arc = None
-                        with st.status(f"Searching for '{foundation_query}'...", expanded=True) as status:
-                            st.write("Querying ProPublica Nonprofit Explorer...")
-                            matches = _propublica_search(foundation_query.strip())
-                            if matches:
-                                best = matches[0]
-                                st.write(f"Found: {best['name']} (EIN {best['strein']})")
-                                st.write("Pulling filed IRS Form 990 financials...")
-                                detail = _propublica_fetch_org(best["ein"])
-                                new_arc = _propublica_to_archival_grant(best, detail)
-                                status.update(label="Lookup complete!", state="complete")
+                        progress_slot = st.empty()
+                        def _report(i, total, name):
+                            progress_slot.write(f"Checking candidate {i} of {total} for private-foundation status: {name}...")
+                        with st.spinner(f"Searching for '{foundation_query}'..."):
+                            results, raw_count = _propublica_discover_private_foundations(
+                                foundation_query.strip(), state_code.strip().upper(), on_progress=_report
+                            )
+                        progress_slot.empty()
+                        if raw_count == 0:
+                            st.warning(f"No organizations found matching '{foundation_query}'.")
+                        elif not results:
+                            st.warning(f"Found {raw_count} organization{'s' if raw_count != 1 else ''} matching '{foundation_query}', but none were private foundations (990-PF filers) — they may be public charities instead.")
+                        else:
+                            existing_funders = org.get("existing_funders", [])
+                            def _is_existing_funder(name):
+                                name_l = name.lower()
+                                return any(ef.lower() in name_l or name_l in ef.lower() for ef in existing_funders)
+                            new_prospects = [r for r in results if not _is_existing_funder(r["funding_org"])]
+                            excluded_count = len(results) - len(new_prospects)
+                            if not new_prospects:
+                                st.info(f"Found {len(results)} private foundation{'s' if len(results) != 1 else ''} matching '{foundation_query}', but all are already in your Existing Funders list (Organization Profile).")
                             else:
-                                status.update(label=f"No organizations found matching '{foundation_query}'.", state="error")
-                        if new_arc:
-                            existing_keys = {g["funding_org"] + g["program_name"] for g in st.session_state.grants}
-                            if new_arc["funding_org"] + new_arc["program_name"] not in existing_keys:
-                                st.session_state.grants.append(new_arc)
-                                alert = {"id": f"a{random.randint(100,999)}", "grant_name": "Real 990 lookup complete", "funding_org": f"{new_arc['funding_org']} added to archival research", "sent_ago": "just now", "recipients": len(st.session_state.users)}
-                                st.session_state.alert_log.insert(0, alert)
-                                st.session_state.unread_alerts += 1
-                            st.rerun()
+                                st.session_state.discovery_results = new_prospects
+                                st.session_state.discovery_query = foundation_query.strip()
+                                if excluded_count:
+                                    st.caption(f"Excluded {excluded_count} result{'s' if excluded_count != 1 else ''} already in your Existing Funders list — showing new prospects only.")
                     except requests.RequestException:
                         st.error("Couldn't reach ProPublica's Nonprofit Explorer — check your connection and try again.")
+
+            discovery_results = st.session_state.get("discovery_results") or []
+            if discovery_results:
+                st.divider()
+                st.caption(f"Real private foundations matching '{st.session_state.get('discovery_query', '')}':")
+                for candidate in list(discovery_results):
+                    with st.container(border=True):
+                        st.markdown(f"**{candidate['funding_org']}**")
+                        st.caption(candidate["description"])
+                        if st.button("➕ Add to Pipeline", key=f"add_disc_{candidate['id']}"):
+                            existing_keys = {g["funding_org"] + g["program_name"] for g in st.session_state.grants}
+                            if candidate["funding_org"] + candidate["program_name"] not in existing_keys:
+                                st.session_state.grants.append(candidate)
+                                alert = {"id": f"a{random.randint(100,999)}", "grant_name": "Private foundation added", "funding_org": f"{candidate['funding_org']} added to archival research", "sent_ago": "just now", "recipients": len(st.session_state.users)}
+                                st.session_state.alert_log.insert(0, alert)
+                                st.session_state.unread_alerts += 1
+                            st.session_state.discovery_results = [c for c in discovery_results if c["id"] != candidate["id"]]
+                            st.rerun()
 
     with cc3:
         with st.popover("▶ Run Grant Search", use_container_width=True):
@@ -1020,7 +1090,7 @@ def show_dashboard():
             for g in archival:
                 show_grant_card(g)
         else:
-            st.info("No archival sources yet. Open **🗄️ Search Real 990 Data** above and search a real foundation by name.")
+            st.info("No archival sources yet. Open **🗄️ Find Private Foundations** above and search a name or keyword.")
 
     # Cold leads notice
     if cold:
@@ -1053,16 +1123,25 @@ def show_profile():
 
         populations = st.text_area("Populations Served", value=org["populations_served"], height=80)
 
+        existing_funders_text = st.text_area(
+            "Existing Funders (one per line)",
+            value="\n".join(org.get("existing_funders", [])), height=80,
+            placeholder="e.g.\nThe Chicago Community Trust\nConrad N. Hilton Foundation",
+            help="Funders you already have a relationship with. Private foundation discovery results matching these names are automatically excluded, so you only see new prospects.",
+        )
+
         saved = st.form_submit_button("💾 Save Profile", type="primary")
 
     if saved:
         areas = list(selected_areas)
         if custom_area.strip() and custom_area.strip() not in areas:
             areas.append(custom_area.strip())
+        existing_funders = [line.strip() for line in existing_funders_text.split("\n") if line.strip()]
         st.session_state.org_profile = {
             "name": org_name, "mission": mission, "funding_needs": funding_needs,
             "program_areas": areas, "location_focus": location_focus,
             "budget_range": budget_range, "populations_served": populations,
+            "existing_funders": existing_funders,
         }
         st.success("✅ Profile saved! Grant matching will use your updated profile.")
 
