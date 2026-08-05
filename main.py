@@ -4,6 +4,7 @@ import random
 import requests
 import csv
 import io
+import os
 
 st.set_page_config(
     page_title="GrantScout AI",
@@ -411,6 +412,51 @@ Sincerely,
 {org['name']}
 [Your Email]
 """
+
+def ai_enhancement_available() -> bool:
+    """The AI enhance button is entirely optional — the template draft above always
+    works with zero setup. This only lights up if someone has opted in with their
+    own ANTHROPIC_API_KEY (never hardcoded, never required)."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return False
+    try:
+        import anthropic  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+def enhance_email_with_ai(draft: str, g: dict, org: dict, extra_info: str) -> str:
+    """Ask Claude to sharpen the draft with more specific alignment language grounded
+    in the actual org/grant details below — explicitly told not to invent facts."""
+    import anthropic
+    client = anthropic.Anthropic()
+    prompt = f"""Here is a draft inquiry email from a nonprofit to a potential funder, along with context about the nonprofit and the grant opportunity. Rewrite the draft to be more specific and compelling: replace generic language with concrete details actually present in the context below, and weave in the additional details naturally. Do not invent facts, statistics, or accomplishments that aren't given to you. Keep the same overall structure (introduction, interest and fit, a direct question about fit, and a closing question about required documents). Return only the revised email text, with no preamble or commentary.
+
+ORGANIZATION:
+Name: {org['name']}
+Mission: {org['mission']}
+Funding needs: {org.get('funding_needs', '')}
+Program areas: {', '.join(org.get('program_areas', []))}
+Populations served: {org.get('populations_served', '')}
+
+GRANT OPPORTUNITY:
+Funder: {g['funding_org']}
+Program: {g['program_name']}
+Description: {g['description']}
+Eligibility: {g['eligibility']}
+
+ADDITIONAL DETAILS TO INCORPORATE:
+{extra_info.strip() or '(none provided)'}
+
+CURRENT DRAFT:
+{draft}"""
+    response = client.messages.create(
+        model="claude-opus-5",
+        max_tokens=1024,
+        output_config={"effort": "low"},
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return next(block.text for block in response.content if block.type == "text")
 
 # ── Initial data ──────────────────────────────────────────────────────────────
 
@@ -888,13 +934,42 @@ def show_grant_detail():
                     placeholder="e.g. recent program outcomes, specific alignment notes...",
                 )
                 draft = generate_email_draft(g, st.session_state.org_profile, extra_info)
+                draft_key = f"email_draft_box_{g['id']}"
+
+                # Discard a stale AI-enhanced draft if the user changed the extra details
+                # since it was generated — otherwise the box would keep showing text that
+                # no longer reflects what's in the "additional details" field above.
+                last_extra_key = f"email_extra_last_{g['id']}"
+                if st.session_state.get(last_extra_key) != extra_info:
+                    st.session_state.pop(draft_key, None)
+                    st.session_state[last_extra_key] = extra_info
+
+                if ai_enhancement_available():
+                    if st.button("✨ Enhance with AI", key=f"enhance_ai_{g['id']}"):
+                        import anthropic
+                        try:
+                            with st.spinner("Asking Claude to sharpen this draft..."):
+                                enhanced = enhance_email_with_ai(
+                                    st.session_state.get(draft_key, draft), g,
+                                    st.session_state.org_profile, extra_info,
+                                )
+                            st.session_state[draft_key] = enhanced
+                            st.rerun()
+                        except anthropic.AuthenticationError:
+                            st.error("Invalid ANTHROPIC_API_KEY — check the environment variable and try again.")
+                        except anthropic.RateLimitError:
+                            st.error("Rate limited by Anthropic — wait a moment and try again.")
+                        except anthropic.APIError as e:
+                            st.error(f"Claude API error: {e}")
+                    st.caption("Uses your own ANTHROPIC_API_KEY to rewrite the draft with more specific, grant-aligned language.")
+
                 st.markdown(
-                    "<style>.st-key-email_draft_box textarea { line-height: 1.5 !important; font-family: inherit !important; }</style>",
+                    f"<style>[class*='st-key-{draft_key}'] textarea {{ line-height: 1.5 !important; font-family: inherit !important; }}</style>",
                     unsafe_allow_html=True,
                 )
                 st.text_area(
                     "Email draft", value=draft, height=estimate_box_height(draft),
-                    key="email_draft_box", label_visibility="collapsed",
+                    key=draft_key, label_visibility="collapsed",
                 )
                 st.caption("Click inside, select all (Ctrl+A / Cmd+A), and copy — fill in the bracketed placeholders before sending. GrantScout does not send emails automatically.")
         st.divider()

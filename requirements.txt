@@ -10,3 +10,8 @@
 # Grants.gov and ProPublica Nonprofit Explorer public APIs over HTTPS.
 streamlit>=1.31.0
 requests>=2.31.0
+
+# Optional: only used by the "✨ Enhance with AI" button on the email draft.
+# That button only appears if you set your own ANTHROPIC_API_KEY environment
+# variable — nothing in this app requires it, and it's never hardcoded here.
+anthropic>=0.40.0
