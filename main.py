@@ -741,6 +741,7 @@ def show_sidebar():
         pending_count = len(st.session_state.pending_users)
         nav = [
             ("🏠  Dashboard", "dashboard"),
+            ("📋  Application Tracker", "tracker"),
             ("🏢  Organization Profile", "profile"),
             ("➕  Add Grant Manually", "add_grant"),
         ]
@@ -793,32 +794,37 @@ def show_sidebar():
 
 # ── Grant card ────────────────────────────────────────────────────────────────
 
-def show_grant_card(g: dict):
+def _render_grant_summary(g: dict):
+    """Badges/title/funder/description/deadline/award block shared by the Dashboard
+    grant card and the Application Tracker card, so the two never drift apart."""
     temp = g["temperature"]
-    score = g["match_score"]
     icon = {"hot": "🔴", "warm": "🟡", "less-warm": "⚪"}.get(temp, "")
     days = g["days_to_deadline"]
     dl_icon = "🔴" if days < 30 else "📅"
 
+    badges = f"{icon} **{temp.upper()}**  ·  *{g['source']}*"
+    if g.get("is_manually_added"):
+        badges += "  ·  📝 Manually Added"
+    if g.get("is_demo"):
+        badges += "  ·  🧪 Demo Example"
+    st.markdown(badges)
+    st.markdown(f"### {g['program_name']}")
+    st.caption(f"**{g['funding_org']}**")
+    st.write(g["description"])
+    c1, c2 = st.columns(2)
+    with c1:
+        st.caption(f"{dl_icon} **{days} days** to deadline · {g['deadline']}")
+    with c2:
+        st.caption(f"💰 {g['award_label']}")
+    if g.get("source") == "Archival 990":
+        st.warning("⚠️ Archival data — no active RFP. For cultivation planning only.")
+
+def show_grant_card(g: dict):
+    score = g["match_score"]
     with st.container(border=True):
         col_main, col_score = st.columns([4, 1])
         with col_main:
-            badges = f"{icon} **{temp.upper()}**  ·  *{g['source']}*"
-            if g.get("is_manually_added"):
-                badges += "  ·  📝 Manually Added"
-            if g.get("is_demo"):
-                badges += "  ·  🧪 Demo Example"
-            st.markdown(badges)
-            st.markdown(f"### {g['program_name']}")
-            st.caption(f"**{g['funding_org']}**")
-            st.write(g["description"])
-            c1, c2 = st.columns(2)
-            with c1:
-                st.caption(f"{dl_icon} **{days} days** to deadline · {g['deadline']}")
-            with c2:
-                st.caption(f"💰 {g['award_label']}")
-            if g.get("source") == "Archival 990":
-                st.warning("⚠️ Archival data — no active RFP. For cultivation planning only.")
+            _render_grant_summary(g)
         with col_score:
             st.metric("Match Score", f"{score:.1f} / 5.0")
             st.write(stars(score))
@@ -973,6 +979,74 @@ def show_grant_detail():
                 )
                 st.caption("Click inside, select all (Ctrl+A / Cmd+A), and copy — fill in the bracketed placeholders before sending. GrantScout does not send emails automatically.")
         st.divider()
+
+# ── Application Tracker ──────────────────────────────────────────────────────
+
+TRACKER_STATUSES = ["Not Started", "Actively Working", "Completed"]
+
+def show_tracker_card(g: dict):
+    g.setdefault("status", TRACKER_STATUSES[0])
+    g.setdefault("notes", "")
+    g.setdefault("checklist", {})
+
+    with st.container(border=True):
+        col_main, col_status = st.columns([4, 1])
+        with col_main:
+            _render_grant_summary(g)
+        with col_status:
+            status = st.selectbox(
+                "Status", TRACKER_STATUSES,
+                index=TRACKER_STATUSES.index(g["status"]),
+                key=f"tracker_status_{g['id']}", label_visibility="collapsed",
+            )
+            g["status"] = status
+
+        with st.expander("📝 Notes & Required Documents"):
+            all_docs, conflicts = analyze_required_documents(get_sources(g))
+            if all_docs:
+                gathered = sum(1 for doc in all_docs if g["checklist"].get(doc))
+                st.caption(f"{gathered} of {len(all_docs)} gathered")
+                for doc in all_docs:
+                    flag = " ⚠️" if doc in conflicts else ""
+                    checked = st.checkbox(
+                        f"{doc}{flag}", value=g["checklist"].get(doc, False),
+                        key=f"tracker_chk_{g['id']}_{doc}",
+                    )
+                    g["checklist"][doc] = checked
+            else:
+                st.caption("No required documents listed for this grant.")
+
+            notes = st.text_area(
+                "Notes", value=g["notes"], height=100,
+                key=f"tracker_notes_{g['id']}",
+                placeholder="What have you completed? What's still outstanding?",
+            )
+            g["notes"] = notes
+
+def show_tracker():
+    st.markdown("# Application Tracker")
+    st.caption("Track progress on grants already in your pipeline — status, gathered documents, and notes.")
+
+    grants = st.session_state.grants
+    if not grants:
+        st.info("Nothing in your pipeline yet. Add or search for grants from the Dashboard first.")
+        return
+
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Total", len(grants))
+    for col, status in zip((s2, s3, s4), TRACKER_STATUSES):
+        col.metric(status, sum(1 for g in grants if g.get("status", TRACKER_STATUSES[0]) == status))
+    st.divider()
+
+    filter_choice = st.selectbox("Filter by status", ["All"] + TRACKER_STATUSES, key="tracker_filter")
+    filtered = grants if filter_choice == "All" else [g for g in grants if g.get("status", TRACKER_STATUSES[0]) == filter_choice]
+
+    if not filtered:
+        st.info(f"No grants with status '{filter_choice}'.")
+        return
+
+    for g in filtered:
+        show_tracker_card(g)
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
@@ -1386,6 +1460,8 @@ def main():
     page = st.session_state.page
     if page == "dashboard":
         show_dashboard()
+    elif page == "tracker":
+        show_tracker()
     elif page == "profile":
         show_profile()
     elif page == "add_grant":
