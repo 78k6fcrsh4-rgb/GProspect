@@ -86,6 +86,18 @@ def analyze_required_documents(sources: list):
             conflicts[doc] = {"mentioned_by": mentioned_by, "not_mentioned_by": not_mentioned_by}
     return all_docs, conflicts
 
+def is_existing_funder(name: str, existing_funders: list) -> bool:
+    """Case-insensitive substring match — same rule used to exclude a name from
+    private-foundation discovery results."""
+    name_l = name.lower()
+    return any(ef.lower() in name_l or name_l in ef.lower() for ef in existing_funders)
+
+def add_existing_funder(name: str):
+    """Add a funder to the org's Existing Funders list if not already covered by it."""
+    existing = st.session_state.org_profile.setdefault("existing_funders", [])
+    if not is_existing_funder(name, existing):
+        existing.append(name)
+
 def _grant_data_type(g: dict) -> str:
     if g.get("is_demo"):
         return "Demo Example"
@@ -572,6 +584,7 @@ INITIAL_ORG = {
     "budget_range": "$5M – $10M",
     "populations_served": "Adult women (18+) experiencing chronic homelessness, including survivors of trauma, women with disabilities, and women in recovery.",
     "existing_funders": [],
+    "grantstation_subscriber": False,
 }
 
 INITIAL_ALERTS = [
@@ -994,12 +1007,23 @@ def show_tracker_card(g: dict):
         with col_main:
             _render_grant_summary(g)
         with col_status:
+            was_completed = g["status"] == "Completed"
             status = st.selectbox(
                 "Status", TRACKER_STATUSES,
                 index=TRACKER_STATUSES.index(g["status"]),
                 key=f"tracker_status_{g['id']}", label_visibility="collapsed",
             )
             g["status"] = status
+            if status == "Completed" and not was_completed:
+                add_existing_funder(g["funding_org"])
+
+            existing_funders = st.session_state.org_profile.get("existing_funders", [])
+            if is_existing_funder(g["funding_org"], existing_funders):
+                st.caption("✅ In Existing Funders")
+            elif st.button("➕ Add to Existing Funders", key=f"tracker_addfunder_{g['id']}", use_container_width=True,
+                            help="Excludes this funder from future private-foundation search results."):
+                add_existing_funder(g["funding_org"])
+                st.rerun()
 
         with st.expander("📝 Notes & Required Documents"):
             all_docs, conflicts = analyze_required_documents(get_sources(g))
@@ -1089,6 +1113,13 @@ def show_dashboard():
                 "foundations** file, unlike public charities. Anyone already on your Existing Funders list "
                 "(Organization Profile) is automatically excluded, so you only see new prospects."
             )
+            if org.get("grantstation_subscriber"):
+                st.link_button(
+                    "🔗 Search on GrantStation (by cause area)",
+                    "https://grantstation.com/search/us-funders",
+                    help="Opens GrantStation's own search in a new tab — this can find private funders by cause area, "
+                         "which our free data sources can't. You search it yourself; GrantScout never accesses it automatically.",
+                )
             loc = (org.get("location_focus") or "").upper()
             default_state = "IL" if any(t in loc for t in ("ILLINOIS", "CHICAGO", ", IL")) else ""
             fcol1, fcol2 = st.columns([3, 1])
@@ -1115,10 +1146,7 @@ def show_dashboard():
                             st.warning(f"Found {raw_count} organization{'s' if raw_count != 1 else ''} matching '{foundation_query}', but none were private foundations (990-PF filers) — they may be public charities instead.")
                         else:
                             existing_funders = org.get("existing_funders", [])
-                            def _is_existing_funder(name):
-                                name_l = name.lower()
-                                return any(ef.lower() in name_l or name_l in ef.lower() for ef in existing_funders)
-                            new_prospects = [r for r in results if not _is_existing_funder(r["funding_org"])]
+                            new_prospects = [r for r in results if not is_existing_funder(r["funding_org"], existing_funders)]
                             excluded_count = len(results) - len(new_prospects)
                             if not new_prospects:
                                 st.info(f"Found {len(results)} private foundation{'s' if len(results) != 1 else ''} matching '{foundation_query}', but all are already in your Existing Funders list (Organization Profile).")
@@ -1279,6 +1307,16 @@ def show_profile():
             help="Funders you already have a relationship with. Private foundation discovery results matching these names are automatically excluded, so you only see new prospects.",
         )
 
+        st.markdown("**Premium Subscriptions**")
+        grantstation_subscriber = st.checkbox(
+            "We have a GrantStation subscription",
+            value=org.get("grantstation_subscriber", False),
+            help="GrantStation can search private funders by cause area — something our free data sources can't do. "
+                 "Checking this adds a quick link to their search page on the Dashboard. We never access GrantStation "
+                 "automatically on your behalf — their terms prohibit scraping or automated access, so this is just a shortcut "
+                 "to search it yourself.",
+        )
+
         saved = st.form_submit_button("💾 Save Profile", type="primary")
 
     if saved:
@@ -1291,6 +1329,7 @@ def show_profile():
             "program_areas": areas, "location_focus": location_focus,
             "budget_range": budget_range, "populations_served": populations,
             "existing_funders": existing_funders,
+            "grantstation_subscriber": grantstation_subscriber,
         }
         st.success("✅ Profile saved! Grant matching will use your updated profile.")
 
